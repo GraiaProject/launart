@@ -1,0 +1,19 @@
+[project]
+name = "launart"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "GreyElaina", email = "GreyElaina@outlook.com"},
+]
+dependencies = [
+    "statv>=0.1.0",
+    "loguru>=0.6.0",
+]
+requires-python = ">=3.8"
+readme = "README.md"
+license = {text = "MIT"}
+[tool.pdm]
+
+[build-system]
+requires = ["pdm-pep517>=0.12.0"]
+build-backend = "pdm.pep517.api"
