@@ -1,5 +1,5 @@
 import asyncio
-from typing import Dict, MutableSet, Optional, Type, Literal
+from typing import Dict, Literal, MutableSet, Optional, Type
 
 from loguru import logger
 from statv import Stats, Statv
@@ -7,7 +7,6 @@ from statv import Stats, Statv
 from launart.component import Launchable, resolve_requirements
 from launart.service import ExportInterface, Service, TInterface
 from launart.utilles import priority_strategy, wait_fut
-
 
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
 
@@ -171,7 +170,7 @@ class Launart:
         self.status.stage = "blocking"
         loop = asyncio.get_running_loop()
         self.blocking_task = loop.create_task(
-            wait_fut([i.status.wait_for_completed() for i in self.launchables.values()])
+            wait_fut([i.status.wait_for_finished() for i in self.launchables.values()])
         )
         try:
             await asyncio.shield(self.blocking_task)
