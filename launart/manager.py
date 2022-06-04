@@ -1,5 +1,6 @@
 import asyncio
-from typing import Dict, MutableSet, Optional, Type
+from contextlib import asynccontextmanager
+from typing import Dict, MutableSet, Optional, Type, Literal
 
 from loguru import logger
 from statv import Stats, Statv
@@ -9,8 +10,10 @@ from launart.service import ExportInterface, Service, TInterface
 from launart.utilles import priority_strategy, wait_fut
 
 
+U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
+
 class ManagerStatus(Statv):
-    stage = Stats[Optional[U_Stage]]("stage", default=None)
+    stage = Stats[Optional[U_ManagerStage]]("U_ManagerStage", default=None)
 
     def __init__(self) -> None:
         super().__init__()
@@ -20,7 +23,7 @@ class ManagerStatus(Statv):
 
     @property
     def preparing(self) -> bool:
-        return self.stage == "prepare"
+        return self.stage == "preparing"
 
     @property
     def blocking(self) -> bool:
@@ -28,36 +31,18 @@ class ManagerStatus(Statv):
 
     @property
     def cleaning(self) -> bool:
-        return self.stage == "cleanup"
-
-    def unset(self) -> None:
-        self.stage = None
-
-    def set_prepare(self) -> None:
-        if self.stage is not None:
-            raise ValueError("this component cannot prepare twice.")
-        self.stage = "prepare"
-
-    def set_blocking(self) -> None:
-        if self.stage != "prepare":
-            raise ValueError("this component cannot be blocking before prepare nor after cleanup.")
-        self.stage = "blocking"
-
-    def set_cleanup(self) -> None:
-        if self.stage != "blocking":
-            raise ValueError("this component cannot cleanup before blocking.")
-        self.stage = "cleanup"
+        return self.stage == "cleaning"
 
     async def wait_for_prepared(self):
-        while self.stage == "prepare" or self.stage is None:
+        while self.stage == "preparing" or self.stage is None:
             await self.wait_for_update()
 
     async def wait_for_completed(self):
-        while self.stage != "cleanup":
+        while self.stage != "finished":
             await self.wait_for_update()
 
     async def wait_for_sigexit(self):
-        while self.stage in {"prepare", "blocking"}:
+        while self.stage in {"preparing", "blocking"}:
             await self.wait_for_update()
 
 
@@ -112,6 +97,7 @@ class Launart:
             raise ValueError(f"{interface_type} is not supported.")
         return self._service_bind[interface_type].get_interface(interface_type)
 
+
     async def launch(self):
         logger.info(f"launchable components count: {len(self.launchables)}")
         logger.info(f"launch all components...")
@@ -119,6 +105,9 @@ class Launart:
         if self.status.stage is not None:
             logger.error("detect existed ownership, launart may already running.")
             return
+
+        for launchable in self.launchables.values():
+            launchable.ensure_manager(self)
 
         _bind = {_id: _component for _id, _component in self.launchables.items()}
         tasks = {
@@ -163,7 +152,7 @@ class Launart:
         for task in tasks.values():
             task.add_done_callback(task_done_cb)
 
-        self.status.set_prepare()
+        self.status.stage = "preparing"
         upper: MutableSet[str] = set()
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
             await wait_fut([i.status.wait_for_prepared() for i in components if "prepare" in i.required])
@@ -180,7 +169,7 @@ class Launart:
 
         logger.info("all components prepared, blocking start.", style="green bold")
 
-        self.status.set_blocking()
+        self.status.stage = "blocking"
         loop = asyncio.get_running_loop()
         self.blocking_task = loop.create_task(
             wait_fut([i.status.wait_for_completed() for i in self.launchables.values()])
@@ -193,8 +182,9 @@ class Launart:
             logger.info("application's sigexit detected, start cleanup", style="red bold")
 
             upper = set()
+            self.status.stage = "cleaning"
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
-                await wait_fut([i.status.wait_for_finished() for i in components if "cleanup" in i.required])
+                await wait_fut([i.status.wait_for_cleaned() for i in components if "cleanup" in i.required])
                 logger.success(
                     f"Layer #{layer}:[{', '.join([i.id for i in components])}] cleanup completed.",
                     alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan]{i.id}[/cyan]' for i in components])}] cleanup completed.",
@@ -204,6 +194,8 @@ class Launart:
                     if component_req:
                         component.on_require_exited(component_req)
                 upper = {i.id for i in components}
+
+            self.status.stage = "finished"
             logger.success("cleanup stage finished, now waits for tasks' finale.", style="green bold")
             await wait_fut([i for i in tasks.values() if not i.done()])
             logger.warning("all done.", style="red bold")
@@ -239,4 +231,3 @@ class Launart:
             # wakeup loop if it is blocked by select() with long timeout
             main_task._loop.call_soon_threadsafe(lambda: None)
             logger.info("Ctrl-C triggered by user.", style="dark_orange bold")
-        self.status.set_cleanup()
