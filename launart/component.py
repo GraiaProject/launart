@@ -3,7 +3,6 @@ from __future__ import annotations
 from abc import ABCMeta, abstractmethod
 import asyncio
 from contextlib import asynccontextmanager
-from tkinter import N
 from typing import TYPE_CHECKING, List, Optional, Set, cast
 
 from statv import Stats, Statv

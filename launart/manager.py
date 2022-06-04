@@ -1,11 +1,10 @@
 import asyncio
-from contextlib import asynccontextmanager
 from typing import Dict, MutableSet, Optional, Type, Literal
 
 from loguru import logger
 from statv import Stats, Statv
 
-from launart.component import Launchable, U_Stage, resolve_requirements
+from launart.component import Launchable, resolve_requirements
 from launart.service import ExportInterface, Service, TInterface
 from launart.utilles import priority_strategy, wait_fut
 
