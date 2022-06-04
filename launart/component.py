@@ -97,8 +97,9 @@ class Launchable(metaclass=ABCMeta):
         if self.manager is None:
             raise RuntimeError("attempted to set stage of a launchable without a manager.")
         if self.manager.status.stage is None:
-            raise RuntimeError("attempted to set stage of a launchable without a current manager")
-
+            raise LookupError("attempted to set stage of a launchable without a current manager")
+        if stage not in self.stages:
+            raise ValueError(f"undefined and unexpected stage entering: {stage}")
         m = cast(U_Stage, STAGE_MAPPING_REVERSED[self.manager.status.stage])
         n = STAGES.index(m) + 1
         l = STAGES[n:]
