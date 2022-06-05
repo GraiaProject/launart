@@ -4,8 +4,8 @@ import asyncio
 from abc import ABCMeta, abstractmethod
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, List, Optional, Set, cast
-from loguru import logger
 
+from loguru import logger
 from statv import Stats, Statv
 
 try:
@@ -45,6 +45,10 @@ class LaunchableStatus(Statv):
 
     async def wait_for(self, *stages: U_Stage):
         while self.stage not in stages:
+            await self.wait_for_update()
+
+    async def wait_blocking_finish(self):
+        while self.stage == "blocking":
             await self.wait_for_update()
 
     async def wait_for_prepared(self):
@@ -105,12 +109,15 @@ class Launchable(metaclass=ABCMeta):
             raise LookupError("attempted to set stage of a launchable without a current manager")
         if stage not in self.stages:
             raise ValueError(f"undefined and unexpected stage entering: {stage}")
+    
+        """
         m = cast(U_Stage, STAGE_MAPPING_REVERSED[self.manager.status.stage])
         n = STAGES.index(m) + 1
         l = STAGES[n:]
         # example: cleaning -> cleaned -> [cleaned, finished], if stage in [prepare, blocking]: error
+        print(l)
         if stage not in l:
-            raise ValueError(f"stage {stage} is not allowed in this context/stage of {self.manager.status.stage}")
+            raise ValueError(f"stage {stage} is not allowed in this context/stage of {self.manager.status.stage}")"""
 
         if stage == "prepare":
             while self.status.stage in {"waiting-for-prepare", None}:
@@ -127,13 +134,13 @@ class Launchable(metaclass=ABCMeta):
         if stage == "prepare":
             self.status.stage = "prepared"
         elif stage == "blocking":
-            logger.info(f"{self.id} completed it's blocking stage.")
+            logger.info(f"{self.id} completed blocking stage.")
             if "cleanup" in self.stages:
                 self.status.stage = "waiting-for-cleanup"
             else:
                 self.status.stage = "finished"
         elif stage == "cleanup":
-            logger.info(f"{self.id} completed it's cleanup stage.")
+            logger.info(f"{self.id} completed cleanup stage.")
             self.status.stage = "finished"
 
     async def wait_for_required(self, stage: U_Stage = "blocking"):
@@ -148,12 +155,6 @@ class Launchable(metaclass=ABCMeta):
 
     @abstractmethod
     async def launch(self, manager: Launart):
-        pass
-
-    def on_require_prepared(self, components: Set[str]):
-        pass
-
-    def on_require_exited(self, components: Set[str]):
         pass
 
 

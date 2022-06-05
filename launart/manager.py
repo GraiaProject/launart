@@ -117,8 +117,8 @@ class Launart:
             exc = t.exception()
             if exc:
                 logger.opt(exception=exc).error(
-                    f"mainline {t.get_name()} failed.",
-                    alt=f"[red bold]mainline [magenta]{t.get_name()}[/magenta] failed.",
+                    f"[{t.get_name()}] failed.",
+                    alt=f"[red bold]component [magenta]{t.get_name()}[/magenta] failed.",
                 )
             else:
                 component = _bind[t.get_name()]
@@ -144,8 +144,8 @@ class Launart:
                                 f"component {t.get_name()} defined cleanup, but task completed before finished(may forget stat set?)."
                             )
                 logger.success(
-                    f"mainline {t.get_name()} completed.",
-                    alt=f"[green]mainline [magenta]{t.get_name()}[/magenta] completed.",
+                    f"[{t.get_name()}] running completed.",
+                    alt=f"\\[[magenta]{t.get_name()}[/magenta]] running completed.",
                 )
 
         for task in tasks.values():
@@ -154,57 +154,45 @@ class Launart:
         self.status.stage = "preparing"
         for launchable in self.launchables.values():
             launchable.status.stage = "waiting-for-prepare"
-        upper: MutableSet[str] = set()
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
             for i in components:
                 i.status.stage = "prepare"
-            await wait_fut([i.status.wait_for_prepared() for i in components if "prepare" in i.required])
+            await asyncio.wait([i.status.wait_for_prepared() for i in components if "prepare" in i.stages])
 
             logger.success(
                 f"Layer #{layer}:[{', '.join([i.id for i in components])}] preparation completed.",
                 alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan italic]{i.id}[/cyan italic]' for i in components])}] preparation completed.",
             )
-            for component in components:
-                component_req = upper.intersection(component.required)
-                if component_req:
-                    component.on_require_prepared(component_req)
-            upper = {i.id for i in components}
 
         logger.info("all components prepared, blocking start.", style="green bold")
 
         self.status.stage = "blocking"
         loop = asyncio.get_running_loop()
-        self.blocking_task = loop.create_task(
-            wait_fut([i.status.wait_for_finished() for i in self.launchables.values()])
-        )
+        self.blocking_task = loop.create_task(asyncio.wait([
+            i.status.wait_blocking_finish() for i in self.launchables.values() if "blocking" in i.stages
+        ]))
         try:
             await asyncio.shield(self.blocking_task)
         except asyncio.CancelledError:
             logger.info("cancelled by user.", style="red bold")
             self.status.exiting = True
         finally:
-            logger.info("application's sigexit detected, start cleanup", style="red bold")
+            logger.info("sigexit detected, start cleanup", style="red bold")
 
-            upper = set()
             self.status.stage = "cleaning"
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
                 for i in components:
                     i.status.stage = "cleanup"
-                await wait_fut([i.status.wait_for("finished") for i in components if "cleanup" in i.required])
+                await asyncio.wait([i.status.wait_for("finished") for i in components if "cleanup" in i.stages])
                 logger.success(
                     f"Layer #{layer}:[{', '.join([i.id for i in components])}] cleanup completed.",
                     alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan]{i.id}[/cyan]' for i in components])}] cleanup completed.",
                 )
-                for component in components:
-                    component_req = upper.intersection(component.required)
-                    if component_req:
-                        component.on_require_exited(component_req)
-                upper = {i.id for i in components}
 
             self.status.stage = "finished"
-            logger.success("cleanup stage finished, now waits for tasks' finale.", style="green bold")
+            logger.info("cleanup stage finished, now waits for tasks' finale.", style="green bold")
             await wait_fut([i for i in tasks.values() if not i.done()])
-            logger.warning("all done.", style="red bold")
+            logger.warning("all launch task finished.", style="green bold")
 
     def launch_blocking(self, *, loop: Optional[asyncio.AbstractEventLoop] = None):
         import functools
