@@ -12,6 +12,7 @@ U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
 
 class ManagerStatus(Statv):
     stage = Stats[Optional[U_ManagerStage]]("U_ManagerStage", default=None)
+    exiting = Stats[bool]("exiting", default=False)
 
     def __init__(self) -> None:
         super().__init__()
@@ -40,7 +41,7 @@ class ManagerStatus(Statv):
             await self.wait_for_update()
 
     async def wait_for_sigexit(self):
-        while self.stage in {"preparing", "blocking"}:
+        while self.stage in {"preparing", "blocking"} and not self.exiting:
             await self.wait_for_update()
 
 
@@ -151,8 +152,12 @@ class Launart:
             task.add_done_callback(task_done_cb)
 
         self.status.stage = "preparing"
+        for launchable in self.launchables.values():
+            launchable.status.stage = "waiting-for-prepare"
         upper: MutableSet[str] = set()
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
+            for i in components:
+                i.status.stage = "prepare"
             await wait_fut([i.status.wait_for_prepared() for i in components if "prepare" in i.required])
 
             logger.success(
@@ -176,13 +181,16 @@ class Launart:
             await asyncio.shield(self.blocking_task)
         except asyncio.CancelledError:
             logger.info("cancelled by user.", style="red bold")
+            self.status.exiting = True
         finally:
             logger.info("application's sigexit detected, start cleanup", style="red bold")
 
             upper = set()
             self.status.stage = "cleaning"
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
-                await wait_fut([i.status.wait_for_cleaned() for i in components if "cleanup" in i.required])
+                for i in components:
+                    i.status.stage = "cleanup"
+                await wait_fut([i.status.wait_for("finished") for i in components if "cleanup" in i.required])
                 logger.success(
                     f"Layer #{layer}:[{', '.join([i.id for i in components])}] cleanup completed.",
                     alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan]{i.id}[/cyan]' for i in components])}] cleanup completed.",
@@ -218,6 +226,7 @@ class Launart:
                 signal_handler = None
         else:
             sigint_handler = None
+
         loop.run_until_complete(launch_task)
 
         if sigint_handler is not None and signal.getsignal(signal.SIGINT) is sigint_handler:
@@ -229,3 +238,4 @@ class Launart:
             # wakeup loop if it is blocked by select() with long timeout
             main_task._loop.call_soon_threadsafe(lambda: None)
             logger.info("Ctrl-C triggered by user.", style="dark_orange bold")
+        self.status.exiting = True

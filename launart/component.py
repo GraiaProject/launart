@@ -4,6 +4,7 @@ import asyncio
 from abc import ABCMeta, abstractmethod
 from contextlib import asynccontextmanager
 from typing import TYPE_CHECKING, List, Optional, Set, cast
+from loguru import logger
 
 from statv import Stats, Statv
 
@@ -15,7 +16,7 @@ except ImportError:
 if TYPE_CHECKING:
     from launart.manager import Launart
 
-U_Stage = Literal["prepare", "blocking", "cleanup", "finished"]
+U_Stage = Literal["waiting-for-prepare", "prepare", "prepared", "blocking", "waiting-for-cleanup", "cleanup", "finished"]
 # 现在所处的阶段.
 # 状态机-like: 只有 prepare -> blocking -> cleanup 这个流程.
 # finished 仅标记完成, 不表示阶段.
@@ -41,6 +42,10 @@ class LaunchableStatus(Statv):
 
     def unset(self) -> None:
         self.stage = None
+
+    async def wait_for(self, *stages: U_Stage):
+        while self.stage not in stages:
+            await self.wait_for_update()
 
     async def wait_for_prepared(self):
         while self.stage == "prepare" or self.stage is None:
@@ -84,7 +89,7 @@ class Launchable(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def stages(self) -> Set[U_Stage]:
+    def stages(self) -> Set[Literal["prepare", "blocking", "cleanup"]]:
         ...
 
     def ensure_manager(self, manager: Launart):
@@ -107,14 +112,29 @@ class Launchable(metaclass=ABCMeta):
         if stage not in l:
             raise ValueError(f"stage {stage} is not allowed in this context/stage of {self.manager.status.stage}")
 
-        if stage == "cleanup":
-            await self.wait_for_required("cleanup")
+        if stage == "prepare":
+            while self.status.stage in {"waiting-for-prepare", None}:
+                await self.status.wait_for_update()
+        elif stage == "cleanup":
+            while self.status.stage in {"blocking", "waiting-for-cleanup"}:
+                await self.status.wait_for_update()
+        elif stage == "blocking":
+            self.status.stage = "blocking"
 
         while self.manager.status.stage != STAGE_MAPPING[stage]:
             await self.manager.status.wait_for_update()
         yield
-        # stage=cleanup -> cleaning -> cleaned and set stat.
-        self.status.stage = stage
+        if stage == "prepare":
+            self.status.stage = "prepared"
+        elif stage == "blocking":
+            logger.info(f"{self.id} completed it's blocking stage.")
+            if "cleanup" in self.stages:
+                self.status.stage = "waiting-for-cleanup"
+            else:
+                self.status.stage = "finished"
+        elif stage == "cleanup":
+            logger.info(f"{self.id} completed it's cleanup stage.")
+            self.status.stage = "finished"
 
     async def wait_for_required(self, stage: U_Stage = "blocking"):
         await self.wait_for(stage, *self.required)
