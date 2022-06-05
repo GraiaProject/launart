@@ -107,6 +107,9 @@ class Launchable(metaclass=ABCMeta):
         if stage not in l:
             raise ValueError(f"stage {stage} is not allowed in this context/stage of {self.manager.status.stage}")
 
+        if stage == "cleanup":
+            await self.wait_for_required("cleanup")
+
         while self.manager.status.stage != STAGE_MAPPING[stage]:
             await self.manager.status.wait_for_update()
         yield
@@ -114,11 +117,7 @@ class Launchable(metaclass=ABCMeta):
         self.status.stage = stage
 
     async def wait_for_required(self, stage: U_Stage = "blocking"):
-        if self.manager is None:
-            raise RuntimeError("attempted to set stage of a launchable without a manager.")
-        requires = [self.manager.get_launchable(id) for id in self.required]
-        if any(launchable.status.stage != stage for launchable in requires):
-            await asyncio.wait([launchable.status.wait_for_prepared() for launchable in requires])
+        await self.wait_for(stage, *self.required)
 
     async def wait_for(self, stage: U_Stage, *launchable_id: str):
         if self.manager is None:
