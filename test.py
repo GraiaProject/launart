@@ -42,9 +42,11 @@ class Test2(Launchable):
     async def launch(self, manager: Launart):
         async with self.stage("prepare"):
             print("prepare2")
+
         async with self.stage("blocking"):
             print("blocking")
             await asyncio.sleep(3)
+
         async with self.stage("cleanup"):
             print("cleanup2")
 
