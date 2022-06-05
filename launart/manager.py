@@ -156,8 +156,8 @@ class Launart:
             launchable.status.stage = "waiting-for-prepare"
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
             for i in components:
-                i.status.stage = "prepare"
-            coros = [i.status.wait_for_prepared() for i in components if "prepare" in i.stages]
+                i.status.stage = "preparing"
+            coros = [i.status.wait_for("prepared") for i in components if "prepare" in i.stages]
             if coros:
                 await asyncio.wait(coros)
 
@@ -171,7 +171,7 @@ class Launart:
         self.status.stage = "blocking"
         loop = asyncio.get_running_loop()
         coros = [
-            i.status.wait_blocking_finish() for i in self.launchables.values() if "blocking" in i.stages
+            i.status.wait_for("waiting-for-cleanup", "finished") for i in self.launchables.values() if "blocking" in i.stages
         ]
         try:
             if coros:

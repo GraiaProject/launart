@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABCMeta, abstractmethod
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, List, Optional, Set, cast
+from typing import TYPE_CHECKING, List, Optional, Set, Union, cast
 
 from loguru import logger
 from statv import Stats, Statv
@@ -16,11 +16,22 @@ except ImportError:
 if TYPE_CHECKING:
     from launart.manager import Launart
 
-U_Stage = Literal["waiting-for-prepare", "prepare", "prepared", "blocking", "waiting-for-cleanup", "cleanup", "finished"]
-# 现在所处的阶段.
-# 状态机-like: 只有 prepare -> blocking -> cleanup 这个流程.
-# finished 仅标记完成, 不表示阶段.
-
+U_Stage = Union[Literal[
+    "waiting-for-prepare", "preparing", "prepared",
+    "blocking",
+    "waiting-for-cleanup", "cleanup",
+    "finished"
+], None]
+STAGE_STAT = {
+    None: {"waiting-for-prepare", "waiting-for-cleanup"}, 
+    "waiting-for-prepare": {"preparing"},
+    "preparing": {"prepared"},
+    "prepared": {"blocking", "waiting-for-cleanup", "finished"},
+    "blocking": {"waiting-for-cleanup", "finished"},
+    "waiting-for-cleanup": {"cleanup"},
+    "cleanup": {"finished"},
+    "finished": {None}
+}
 
 class LaunchableStatus(Statv):
     stage = Stats[Optional[U_Stage]]("stage", default=None)
@@ -30,7 +41,7 @@ class LaunchableStatus(Statv):
 
     @property
     def prepared(self) -> bool:
-        return self.stage == "blocking"
+        return self.stage in ("prepared", "blocking")
 
     @property
     def blocking(self) -> bool:
@@ -40,29 +51,19 @@ class LaunchableStatus(Statv):
     def finished(self) -> bool:
         return self.stage == "finished"
 
+    @staticmethod
+    @stage.validator
+    def _(stats: Stats[U_Stage | None], past: U_Stage | None, current: U_Stage | None):
+        if current not in STAGE_STAT[past]:
+            raise ValueError(f"Invalid stage transition: {past} -> {current}")
+        return current
+
     def unset(self) -> None:
         self.stage = None
 
     async def wait_for(self, *stages: U_Stage):
         while self.stage not in stages:
             await self.wait_for_update()
-
-    async def wait_blocking_finish(self):
-        while self.stage == "blocking":
-            await self.wait_for_update()
-
-    async def wait_for_prepared(self):
-        while self.stage == "prepare" or self.stage is None:
-            await self.wait_for_update()
-
-    async def wait_for_cleaned(self):
-        while self.stage != "finished":
-            await self.wait_for_update()
-
-    async def wait_for_finished(self):
-        while self.stage != "finished":
-            await self.wait_for_update()
-
 
 STAGE_MAPPING = {
     "prepare": "preparing",
@@ -76,7 +77,6 @@ STAGE_MAPPING_REVERSED = {
     "cleaning": "cleanup",
     "finished": "finished"
 }
-STAGES: list[U_Stage] = ["prepare", "blocking", "cleanup", "finished"]
 
 class Launchable(metaclass=ABCMeta):
     id: str
@@ -109,39 +109,30 @@ class Launchable(metaclass=ABCMeta):
             raise LookupError("attempted to set stage of a launchable without a current manager")
         if stage not in self.stages:
             raise ValueError(f"undefined and unexpected stage entering: {stage}")
-    
-        """
-        m = cast(U_Stage, STAGE_MAPPING_REVERSED[self.manager.status.stage])
-        n = STAGES.index(m) + 1
-        l = STAGES[n:]
-        # example: cleaning -> cleaned -> [cleaned, finished], if stage in [prepare, blocking]: error
-        print(l)
-        if stage not in l:
-            raise ValueError(f"stage {stage} is not allowed in this context/stage of {self.manager.status.stage}")"""
 
-        if stage == "prepare":
-            while self.status.stage in {"waiting-for-prepare", None}:
-                await self.status.wait_for_update()
-        elif stage == "cleanup":
-            while self.status.stage in {"blocking", "waiting-for-cleanup"}:
-                await self.status.wait_for_update()
-        elif stage == "blocking":
-            self.status.stage = "blocking"
-
-        while self.manager.status.stage != STAGE_MAPPING[stage]:
-            await self.manager.status.wait_for_update()
-        yield
-        if stage == "prepare":
+        if stage == "preparing":
+            if "waiting-for-prepare" not in STAGE_STAT[self.status.stage]:
+                raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-prepare")
+            self.status.stage = "waiting-for-prepare"
+            await self.status.wait_for("preparing")
+            yield
             self.status.stage = "prepared"
-        elif stage == "blocking":
-            logger.info(f"{self.id} completed blocking stage.")
-            if "cleanup" in self.stages:
-                self.status.stage = "waiting-for-cleanup"
-            else:
-                self.status.stage = "finished"
         elif stage == "cleanup":
-            logger.info(f"{self.id} completed cleanup stage.")
+            if "waiting-for-cleanup" not in STAGE_STAT[self.status.stage]:
+                raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-cleanup")
+            self.status.stage = "waiting-for-cleanup"
+            await self.status.wait_for("cleanup")
+            yield
             self.status.stage = "finished"
+        elif stage == "blocking":
+            if "blocking" not in STAGE_STAT[self.status.stage]:
+                raise ValueError(f"unexpected stage entering: {self.status.stage} -> blocking")
+            self.status.stage = "blocking"
+            # TODO: 重新推导
+            yield
+        else:
+            raise ValueError(f"unexpected stage entering: {stage}(unknown define)")
+    
 
     async def wait_for_required(self, stage: U_Stage = "blocking"):
         await self.wait_for(stage, *self.required)
