@@ -157,37 +157,44 @@ class Launart:
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
             for i in components:
                 i.status.stage = "prepare"
-            await asyncio.wait([i.status.wait_for_prepared() for i in components if "prepare" in i.stages])
+            coros = [i.status.wait_for_prepared() for i in components if "prepare" in i.stages]
+            if coros:
+                await asyncio.wait(coros)
 
-            logger.success(
-                f"Layer #{layer}:[{', '.join([i.id for i in components])}] preparation completed.",
-                alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan italic]{i.id}[/cyan italic]' for i in components])}] preparation completed.",
-            )
+                logger.success(
+                    f"Layer #{layer}:[{', '.join([i.id for i in components])}] preparation completed.",
+                    alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan italic]{i.id}[/cyan italic]' for i in components])}] preparation completed.",
+                )
 
         logger.info("all components prepared, blocking start.", style="green bold")
 
         self.status.stage = "blocking"
         loop = asyncio.get_running_loop()
-        self.blocking_task = loop.create_task(asyncio.wait([
+        coros = [
             i.status.wait_blocking_finish() for i in self.launchables.values() if "blocking" in i.stages
-        ]))
+        ]
         try:
-            await asyncio.shield(self.blocking_task)
+            if coros:
+                self.blocking_task = loop.create_task(asyncio.wait(coros))
+                await asyncio.shield(self.blocking_task)
         except asyncio.CancelledError:
             logger.info("cancelled by user.", style="red bold")
             self.status.exiting = True
         finally:
-            logger.info("sigexit detected, start cleanup", style="red bold")
+            logger.info("sigexit received, start cleanup", style="red bold")
 
             self.status.stage = "cleaning"
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
                 for i in components:
                     i.status.stage = "cleanup"
-                await asyncio.wait([i.status.wait_for("finished") for i in components if "cleanup" in i.stages])
-                logger.success(
-                    f"Layer #{layer}:[{', '.join([i.id for i in components])}] cleanup completed.",
-                    alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan]{i.id}[/cyan]' for i in components])}] cleanup completed.",
-                )
+                coros = [i.status.wait_for("finished") for i in components if "cleanup" in i.stages]
+                if coros:
+                    await asyncio.wait(coros)
+
+                    logger.success(
+                        f"Layer #{layer}:[{', '.join([i.id for i in components])}] cleanup completed.",
+                        alt=f"[green]Layer [magenta]#{layer}[/]:[{', '.join([f'[cyan]{i.id}[/cyan]' for i in components])}] cleanup completed.",
+                    )
 
             self.status.stage = "finished"
             logger.info("cleanup stage finished, now waits for tasks' finale.", style="green bold")
