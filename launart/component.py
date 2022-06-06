@@ -16,22 +16,21 @@ except ImportError:
 if TYPE_CHECKING:
     from launart.manager import Launart
 
-U_Stage = Union[Literal[
-    "waiting-for-prepare", "preparing", "prepared",
-    "blocking",
-    "waiting-for-cleanup", "cleanup",
-    "finished"
-], None]
+U_Stage = Union[
+    Literal["waiting-for-prepare", "preparing", "prepared", "blocking", "waiting-for-cleanup", "cleanup", "finished"],
+    None,
+]
 STAGE_STAT = {
-    None: {"waiting-for-prepare", "waiting-for-cleanup"}, 
+    None: {"waiting-for-prepare", "waiting-for-cleanup", "blocking"},
     "waiting-for-prepare": {"preparing"},
     "preparing": {"prepared"},
     "prepared": {"blocking", "waiting-for-cleanup", "finished"},
     "blocking": {"waiting-for-cleanup", "finished"},
     "waiting-for-cleanup": {"cleanup"},
     "cleanup": {"finished"},
-    "finished": {None}
+    "finished": {None},
 }
+
 
 class LaunchableStatus(Statv):
     stage = Stats[Optional[U_Stage]]("stage", default=None)
@@ -65,18 +64,10 @@ class LaunchableStatus(Statv):
         while self.stage not in stages:
             await self.wait_for_update()
 
-STAGE_MAPPING = {
-    "prepare": "preparing",
-    "blocking": "blocking",
-    "cleanup": "cleaning",
-    "finished": "finished"
-}
-STAGE_MAPPING_REVERSED = {
-    "preparing": "prepare",
-    "blocking": "blocking",
-    "cleaning": "cleanup",
-    "finished": "finished"
-}
+
+STAGE_MAPPING = {"prepare": "preparing", "blocking": "blocking", "cleanup": "cleaning", "finished": "finished"}
+STAGE_MAPPING_REVERSED = {"preparing": "prepare", "blocking": "blocking", "cleaning": "cleanup", "finished": "finished"}
+
 
 class Launchable(metaclass=ABCMeta):
     id: str
@@ -113,6 +104,7 @@ class Launchable(metaclass=ABCMeta):
         if stage == "preparing":
             if "waiting-for-prepare" not in STAGE_STAT[self.status.stage]:
                 raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-prepare")
+            await self.manager.status.wait_for_preparing()
             self.status.stage = "waiting-for-prepare"
             await self.status.wait_for("preparing")
             yield
@@ -120,6 +112,7 @@ class Launchable(metaclass=ABCMeta):
         elif stage == "cleanup":
             if "waiting-for-cleanup" not in STAGE_STAT[self.status.stage]:
                 raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-cleanup")
+            await self.manager.status.wait_for_cleaning()
             self.status.stage = "waiting-for-cleanup"
             await self.status.wait_for("cleanup")
             yield
@@ -127,14 +120,14 @@ class Launchable(metaclass=ABCMeta):
         elif stage == "blocking":
             if "blocking" not in STAGE_STAT[self.status.stage]:
                 raise ValueError(f"unexpected stage entering: {self.status.stage} -> blocking")
+            await self.manager.status.wait_for_blocking()
+            await self.wait_for_required()
             self.status.stage = "blocking"
-            # TODO: 重新推导
             yield
         else:
             raise ValueError(f"unexpected stage entering: {stage}(unknown define)")
-    
 
-    async def wait_for_required(self, stage: U_Stage = "blocking"):
+    async def wait_for_required(self, stage: U_Stage = "prepared"):
         await self.wait_for(stage, *self.required)
 
     async def wait_for(self, stage: U_Stage, *launchable_id: str):
@@ -142,7 +135,9 @@ class Launchable(metaclass=ABCMeta):
             raise RuntimeError("attempted to set stage of a launchable without a manager.")
         launchables = [self.manager.get_launchable(id) for id in launchable_id]
         while any(launchable.status.stage != stage for launchable in launchables):
-            await asyncio.wait([launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage])
+            await asyncio.wait(
+                [launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage]
+            )
 
     @abstractmethod
     async def launch(self, manager: Launart):

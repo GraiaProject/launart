@@ -10,6 +10,7 @@ from launart.utilles import priority_strategy, wait_fut
 
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
 
+
 class ManagerStatus(Statv):
     stage = Stats[Optional[U_ManagerStage]]("U_ManagerStage", default=None)
     exiting = Stats[bool]("exiting", default=False)
@@ -32,11 +33,19 @@ class ManagerStatus(Statv):
     def cleaning(self) -> bool:
         return self.stage == "cleaning"
 
-    async def wait_for_prepared(self):
-        while self.stage == "preparing" or self.stage is None:
+    async def wait_for_preparing(self):
+        while self.stage != "preparing":
             await self.wait_for_update()
 
-    async def wait_for_completed(self):
+    async def wait_for_blocking(self):
+        while self.stage != "blocking":
+            await self.wait_for_update()
+
+    async def wait_for_cleaning(self):
+        while self.stage != "cleaning":
+            await self.wait_for_update()
+
+    async def wait_for_finished(self):
         while self.stage != "finished":
             await self.wait_for_update()
 
@@ -96,13 +105,12 @@ class Launart:
             raise ValueError(f"{interface_type} is not supported.")
         return self._service_bind[interface_type].get_interface(interface_type)
 
-
     async def launch(self):
         logger.info(f"launchable components count: {len(self.launchables)}")
-        logger.info(f"launch all components...")
+        logger.info(f"launch all components as async task...")
 
         if self.status.stage is not None:
-            logger.error("detect existed ownership, launart may already running.")
+            logger.error("detected incorrect ownership, launart may already running.")
             return
 
         for launchable in self.launchables.values():
@@ -117,49 +125,59 @@ class Launart:
             exc = t.exception()
             if exc:
                 logger.opt(exception=exc).error(
-                    f"[{t.get_name()}] failed.",
-                    alt=f"[red bold]component [magenta]{t.get_name()}[/magenta] failed.",
+                    f"[{t.get_name()}] raised a exception.",
+                    alt=f"[red bold]component [magenta]{t.get_name()}[/magenta] raised a exception.",
                 )
-            else:
-                component = _bind[t.get_name()]
-                if self.status.preparing:
-                    if "prepare" in component.stages:
-                        if component.status.prepared:
-                            logger.info(f"component {t.get_name()} prepared.")
-                        else:
-                            logger.error(
-                                f"component {t.get_name()} defined preparing, but exited before status updating."
-                            )
-                elif self.status.blocking:
-                    if "cleanup" in component.stages:
-                        logger.warning(f"component {t.get_name()} exited before cleanup in blocking.")
+                return
+
+            component = _bind[t.get_name()]
+            if self.status.preparing:
+                if "preparing" in component.stages:
+                    if component.status.prepared:
+                        logger.info(f"component {t.get_name()} reported prepare completed.")
                     else:
-                        logger.info(f"component {t.get_name()} finished.")
-                elif self.status.cleaning:
-                    if "cleanup" in component.stages:
-                        if component.status.finished:
-                            logger.info(f"component {t.get_name()} finished.")
-                        else:
-                            logger.error(
-                                f"component {t.get_name()} defined cleanup, but task completed before finished(may forget stat set?)."
-                            )
-                logger.success(
-                    f"[{t.get_name()}] running completed.",
-                    alt=f"\\[[magenta]{t.get_name()}[/magenta]] running completed.",
-                )
+                        logger.warning(f"component {t.get_name()} defined preparing, but exited before status updating.")
+            elif self.status.blocking:
+                if "cleanup" in component.stages:
+                    logger.warning(f"component {t.get_name()} blocking exited without cleanup.")
+                else:
+                    logger.success(f"component {t.get_name()} finished.")
+            elif self.status.cleaning:
+                if "cleanup" in component.stages:
+                    if component.status.finished:
+                        logger.success(f"component {t.get_name()} finished.")
+                    else:
+                        logger.error(
+                            f"component {t.get_name()} defined cleanup, but task completed without reporting."
+                        )
+            logger.info(
+                f"[{t.get_name()}] running completed.",
+                alt=f"\\[[magenta]{t.get_name()}[/magenta]] running completed.",
+            )
 
         for task in tasks.values():
             task.add_done_callback(task_done_cb)
 
+        loop = asyncio.get_running_loop()
         self.status.stage = "preparing"
-        for launchable in self.launchables.values():
-            launchable.status.stage = "waiting-for-prepare"
+        for k, v in self.launchables.items():
+            if "preparing" in v.stages and v.status.stage != "waiting-for-prepare":
+                await wait_fut(
+                    [tasks[k], v.status.wait_for("waiting-for-prepare")], return_when=asyncio.FIRST_COMPLETED
+                )
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
+            preparing_tasks = []
             for i in components:
-                i.status.stage = "preparing"
-            coros = [i.status.wait_for("prepared") for i in components if "prepare" in i.stages]
-            if coros:
-                await asyncio.wait(coros)
+                if "preparing" in i.stages:
+                    i.status.stage = "preparing"
+                    preparing_tasks.append(
+                        asyncio.wait(
+                            [tasks[i.id], loop.create_task(i.status.wait_for("prepared"))],
+                            return_when=asyncio.FIRST_COMPLETED,
+                        )
+                    )
+            if preparing_tasks:
+                await asyncio.gather(*preparing_tasks)
 
                 logger.success(
                     f"Layer #{layer}:[{', '.join([i.id for i in components])}] preparation completed.",
@@ -169,27 +187,43 @@ class Launart:
         logger.info("all components prepared, blocking start.", style="green bold")
 
         self.status.stage = "blocking"
-        loop = asyncio.get_running_loop()
-        coros = [
-            i.status.wait_for("waiting-for-cleanup", "finished") for i in self.launchables.values() if "blocking" in i.stages
+        blocking_tasks = [
+            asyncio.wait(
+                [tasks[i.id], loop.create_task(i.status.wait_for("waiting-for-cleanup", "finished"))],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            for i in self.launchables.values()
+            if "blocking" in i.stages
         ]
         try:
-            if coros:
-                self.blocking_task = loop.create_task(asyncio.wait(coros))
+            if blocking_tasks:
+                self.blocking_task = loop.create_task(asyncio.wait(blocking_tasks))
                 await asyncio.shield(self.blocking_task)
         except asyncio.CancelledError:
-            logger.info("cancelled by user.", style="red bold")
+            logger.info("blocking phase cancelled by user.", style="red bold")
             self.status.exiting = True
         finally:
-            logger.info("sigexit received, start cleanup", style="red bold")
+            logger.info("application will enter the clean-up phase.", style="bold")
 
             self.status.stage = "cleaning"
+            for k, v in self.launchables.items():
+                if "cleanup" in v.stages and v.status.stage != "waiting-for-cleanup":
+                    await wait_fut(
+                        [tasks[k], v.status.wait_for("waiting-for-cleanup")], return_when=asyncio.FIRST_COMPLETED
+                    )
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
+                cleaning_tasks = []
                 for i in components:
-                    i.status.stage = "cleanup"
-                coros = [i.status.wait_for("finished") for i in components if "cleanup" in i.stages]
-                if coros:
-                    await asyncio.wait(coros)
+                    if "cleanup" in i.stages:
+                        i.status.stage = "cleanup"
+                        cleaning_tasks.append(
+                            asyncio.wait(
+                                [tasks[i.id], loop.create_task(i.status.wait_for("finished"))],
+                                return_when=asyncio.FIRST_COMPLETED,
+                            )
+                        )
+                if cleaning_tasks:
+                    await asyncio.gather(*cleaning_tasks)
 
                     logger.success(
                         f"Layer #{layer}:[{', '.join([i.id for i in components])}] cleanup completed.",
@@ -197,7 +231,7 @@ class Launart:
                     )
 
             self.status.stage = "finished"
-            logger.info("cleanup stage finished, now waits for tasks' finale.", style="green bold")
+            logger.info("cleanup stage finished, now waits for launchable tasks' finale.", style="green bold")
             await wait_fut([i for i in tasks.values() if not i.done()])
             logger.warning("all launch task finished.", style="green bold")
 
@@ -228,9 +262,9 @@ class Launart:
             signal.signal(signal.SIGINT, signal.default_int_handler)
 
     def _on_sigint(self, _, __, main_task: asyncio.Task):
+        self.status.exiting = True
         if not main_task.done():
             main_task.cancel()
             # wakeup loop if it is blocked by select() with long timeout
             main_task._loop.call_soon_threadsafe(lambda: None)
             logger.info("Ctrl-C triggered by user.", style="dark_orange bold")
-        self.status.exiting = True
