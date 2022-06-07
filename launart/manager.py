@@ -6,7 +6,7 @@ from statv import Stats, Statv
 
 from launart.component import Launchable, resolve_requirements
 from launart.service import ExportInterface, Service, TInterface
-from launart.utilles import priority_strategy, wait_fut
+from launart.utilles import FlexibleTaskGroup, priority_strategy, wait_fut
 
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
 
@@ -57,7 +57,8 @@ class ManagerStatus(Statv):
 class Launart:
     launchables: Dict[str, Launchable]
     status: ManagerStatus
-    blocking_task: Optional[asyncio.Task] = None
+    #blocking_task: Optional[asyncio.Task] = None
+    taskgroup: Optional[FlexibleTaskGroup] = None
 
     _service_bind: Dict[Type[ExportInterface], Service]
 
@@ -70,6 +71,8 @@ class Launart:
         if launchable.id in self.launchables:
             raise ValueError(f"Launchable {launchable.id} already exists.")
         self.launchables[launchable.id] = launchable
+        if self.taskgroup is not None:
+            pass # TODO: sideload prepare.
 
     def get_launchable(self, id: str):
         if id not in self.launchables:
@@ -154,6 +157,7 @@ class Launart:
                 f"[{t.get_name()}] running completed.",
                 alt=f"\\[[magenta]{t.get_name()}[/magenta]] running completed.",
             )
+            #self.get_launchable(t.get_name()).status.stage = "finished"
 
         for task in tasks.values():
             task.add_done_callback(task_done_cb)
@@ -187,18 +191,19 @@ class Launart:
         logger.info("all components prepared, blocking start.", style="green bold")
 
         self.status.stage = "blocking"
+        self.taskgroup = FlexibleTaskGroup()
         blocking_tasks = [
             asyncio.wait(
-                [tasks[i.id], loop.create_task(i.status.wait_for("waiting-for-cleanup", "finished"))],
+                [tasks[i.id], loop.create_task(i.status.wait_for("blocking-completed", "finished"))],
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for i in self.launchables.values()
             if "blocking" in i.stages
         ]
+        self.taskgroup.add_coroutines(*blocking_tasks)
         try:
             if blocking_tasks:
-                self.blocking_task = loop.create_task(asyncio.wait(blocking_tasks))
-                await asyncio.shield(self.blocking_task)
+                await self.taskgroup.wait()
         except asyncio.CancelledError:
             logger.info("blocking phase cancelled by user.", style="red bold")
             self.status.exiting = True
@@ -263,6 +268,8 @@ class Launart:
 
     def _on_sigint(self, _, __, main_task: asyncio.Task):
         self.status.exiting = True
+        if self.taskgroup is not None:
+            self.taskgroup.stop = True
         if not main_task.done():
             main_task.cancel()
             # wakeup loop if it is blocked by select() with long timeout

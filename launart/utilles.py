@@ -98,3 +98,62 @@ async def wait_fut(
             tasks.append(c)
     if tasks:
         await asyncio.wait(tasks, timeout=timeout, return_when=return_when)
+
+
+class FlexibleTaskGroup:
+    tasks: list[asyncio.Task]
+    blocking_task: Optional[asyncio.Task] = None
+    stop: bool = False
+
+    def __init__(self, *tasks):
+        self.tasks = list(tasks)
+
+    def __await__(self):
+        loop = asyncio.get_running_loop()
+        self.blocking_task = loop.create_task(self.__await_impl__())
+        return self.blocking_task.__await__()
+
+    async def __await_impl__(self):
+        while True:
+            try:
+                return await asyncio.shield(asyncio.wait(self.tasks))
+            except asyncio.CancelledError:
+                print("tg c!", self.stop)
+                if self.stop:
+                    raise
+            except KeyboardInterrupt:
+                for task in self.tasks:
+                    task.cancel()
+                raise
+
+    async def wait(self):
+        loop = asyncio.get_running_loop()
+        self.blocking_task = loop.create_task(self.__await_impl__())
+        await self.blocking_task
+
+    def add_task(self, task: asyncio.Task):
+        if self.blocking_task is not None:
+            self.blocking_task.cancel()
+        self.tasks.append(task)
+
+    def add_coroutine(self, coroutine: Coroutine):
+        if self.blocking_task is not None:
+            task = self.blocking_task._loop.create_task(coroutine)
+        else:
+            task = asyncio.create_task(coroutine)
+        self.add_task(task)
+
+    def add_tasks(self, *tasks: asyncio.Task):
+        if self.blocking_task is not None:
+            self.blocking_task.cancel()
+        self.tasks.extend(tasks)
+    
+    def add_coroutines(self, *coroutines: Coroutine):
+        if self.blocking_task is not None:
+            tasks = [
+                self.blocking_task._loop.create_task(coroutine)
+                for coroutine in coroutines
+            ]
+        else:
+            tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+        self.add_tasks(*tasks)

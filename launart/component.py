@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from launart.manager import Launart
 
 U_Stage = Union[
-    Literal["waiting-for-prepare", "preparing", "prepared", "blocking", "waiting-for-cleanup", "cleanup", "finished"],
+    Literal["waiting-for-prepare", "preparing", "prepared", "blocking", "blocking-completed", "waiting-for-cleanup", "cleanup", "finished"],
     None,
 ]
 STAGE_STAT = {
@@ -25,11 +25,14 @@ STAGE_STAT = {
     "waiting-for-prepare": {"preparing"},
     "preparing": {"prepared"},
     "prepared": {"blocking", "waiting-for-cleanup", "finished"},
-    "blocking": {"waiting-for-cleanup", "finished"},
+    "blocking": {"blocking-completed"},
+    "blocking-completed": {"waiting-for-cleanup", "finished"},
     "waiting-for-cleanup": {"cleanup"},
     "cleanup": {"finished"},
     "finished": {None},
 }
+# for runtime check:
+STATS = [None, "waiting-for-prepare", "preparing", "prepared", "blocking", "blocking-completed", "waiting-for-cleanup", "cleanup", "finished"]
 
 
 class LaunchableStatus(Statv):
@@ -124,6 +127,7 @@ class Launchable(metaclass=ABCMeta):
             await self.wait_for_required()
             self.status.stage = "blocking"
             yield
+            self.status.stage = "blocking-completed"
         else:
             raise ValueError(f"unexpected stage entering: {stage}(unknown define)")
 
@@ -134,9 +138,11 @@ class Launchable(metaclass=ABCMeta):
         if self.manager is None:
             raise RuntimeError("attempted to set stage of a launchable without a manager.")
         launchables = [self.manager.get_launchable(id) for id in launchable_id]
-        while any(launchable.status.stage != stage for launchable in launchables):
+        while any(launchable.status.stage not in STATS[STATS.index(stage):] for launchable in launchables):
+            print([(i.id, i.status.stage) for i in launchables])
             await asyncio.wait(
-                [launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage]
+                [launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage],
+                return_when=asyncio.FIRST_COMPLETED
             )
 
     @abstractmethod

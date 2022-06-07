@@ -1,5 +1,5 @@
-import richuru
-richuru.install()
+#import richuru
+#richuru.install()
 
 import asyncio
 from launart import Launart, Launchable
@@ -15,15 +15,16 @@ class TestLaunchable(Launchable):
     
     @property
     def stages(self) -> set[str]:
-        return {"prepare", "blocking", "cleanup"}
+        return {"preparing", "blocking", "cleanup"}
     
     async def launch(self, manager: Launart):
-        async with self.stage("prepare"):
+        async with self.stage("preparing"):
             print("prepare")
             await asyncio.sleep(3)
         async with self.stage("blocking"):
             print("blocking")
             await asyncio.sleep(3)
+            print("unblocking 1")
         async with self.stage("cleanup"):
             print("cleanup")
             await asyncio.sleep(3)
@@ -37,15 +38,16 @@ class Test2(Launchable):
     
     @property
     def stages(self) -> set[str]:
-        return {"prepare", "blocking", "cleanup"}
+        return {"preparing", "blocking", "cleanup"}
     
     async def launch(self, manager: Launart):
-        async with self.stage("prepare"):
+        async with self.stage("preparing"):
             print("prepare2")
 
         async with self.stage("blocking"):
             print("blocking")
             await asyncio.sleep(3)
+            print("unblocking 2")
 
         async with self.stage("cleanup"):
             print("cleanup2")
