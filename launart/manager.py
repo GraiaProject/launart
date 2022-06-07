@@ -123,6 +123,7 @@ class Launart:
             raise ValueError(f"Launchable {id} does not exists.")
         if self.taskgroup is not None:
             raise RuntimeError("cannot remove launchable while taskgroup is running.")
+        # TODO: unsafe remove on runtime
         del self.launchables[id]
 
     def _update_service_bind(self):
