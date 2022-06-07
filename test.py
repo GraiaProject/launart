@@ -2,6 +2,7 @@
 #richuru.install()
 
 import asyncio
+
 from launart import Launart, Launchable
 
 art = Launart()
@@ -46,11 +47,37 @@ class Test2(Launchable):
 
         async with self.stage("blocking"):
             print("blocking")
+            print('test for sideload')
+            manager.add_launchable(TestSideload())
             await asyncio.sleep(3)
             print("unblocking 2")
 
         async with self.stage("cleanup"):
             print("cleanup2")
+
+class TestSideload(Launchable):
+    id = "test_sideload"
+
+    @property
+    def required(self) -> set[str]:
+        return set()
+    
+    @property
+    def stages(self) -> set[str]:
+        return {"preparing", "blocking", "cleanup"}
+
+    async def launch(self, manager: Launart):
+        async with self.stage("preparing"):
+            print("prepare in sideload")
+            await asyncio.sleep(3)
+        async with self.stage("blocking"):
+            print("blocking in sideload")
+            await asyncio.sleep(3)
+            print("unblocking in sideload")
+            #print(manager.taskgroup.blocking_task)
+        async with self.stage("cleanup"):
+            print("cleanup in sideload")
+            await asyncio.sleep(3)
 
 art.add_launchable(TestLaunchable())
 art.add_launchable(Test2())

@@ -118,7 +118,6 @@ class FlexibleTaskGroup:
             try:
                 return await asyncio.shield(asyncio.wait(self.tasks))
             except asyncio.CancelledError:
-                print("tg c!", self.stop)
                 if self.stop:
                     raise
             except KeyboardInterrupt:
@@ -147,13 +146,10 @@ class FlexibleTaskGroup:
         if self.blocking_task is not None:
             self.blocking_task.cancel()
         self.tasks.extend(tasks)
-    
+
     def add_coroutines(self, *coroutines: Coroutine):
         if self.blocking_task is not None:
-            tasks = [
-                self.blocking_task._loop.create_task(coroutine)
-                for coroutine in coroutines
-            ]
+            tasks = [self.blocking_task._loop.create_task(coroutine) for coroutine in coroutines]
         else:
             tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
         self.add_tasks(*tasks)

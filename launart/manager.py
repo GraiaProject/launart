@@ -1,14 +1,50 @@
 import asyncio
-from typing import Dict, Literal, Optional, Type
+from functools import partial
+from typing import TYPE_CHECKING, Dict, Literal, Optional, Type, cast
 
 from loguru import logger
 from statv import Stats, Statv
 
+from launart._sideload import override
 from launart.component import Launchable, resolve_requirements
 from launart.service import ExportInterface, Service, TInterface
-from launart.utilles import FlexibleTaskGroup, priority_strategy, wait_fut
+from launart.utilles import FlexibleTaskGroup, priority_strategy
 
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
+
+
+def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):
+    exc = t.exception()
+    if exc:
+        logger.opt(exception=exc).error(
+            f"[{t.get_name()}] raised a exception.",
+            alt=f"[red bold]component [magenta]{t.get_name()}[/magenta] raised a exception.",
+        )
+        return
+
+    component = mgr.get_launchable(t.get_name())
+    if mgr.status.preparing:
+        if "preparing" in component.stages:
+            if component.status.prepared:
+                logger.info(f"component {t.get_name()} reported prepare completed.")
+            else:
+                logger.warning(f"component {t.get_name()} defined preparing, but exited before status updating.")
+    elif mgr.status.blocking:
+        if "cleanup" in component.stages:
+            logger.warning(f"component {t.get_name()} blocking exited without cleanup.")
+        else:
+            logger.success(f"component {t.get_name()} finished.")
+    elif mgr.status.cleaning:
+        if "cleanup" in component.stages:
+            if component.status.finished:
+                logger.success(f"component {t.get_name()} finished.")
+            else:
+                logger.error(f"component {t.get_name()} defined cleanup, but task completed without reporting.")
+
+    logger.info(
+        f"[{t.get_name()}] running completed.",
+        alt=f"\\[[magenta]{t.get_name()}[/magenta]] running completed.",
+    )
 
 
 class ManagerStatus(Statv):
@@ -57,7 +93,7 @@ class ManagerStatus(Statv):
 class Launart:
     launchables: Dict[str, Launchable]
     status: ManagerStatus
-    #blocking_task: Optional[asyncio.Task] = None
+    tasks: dict[str, asyncio.Task]
     taskgroup: Optional[FlexibleTaskGroup] = None
 
     _service_bind: Dict[Type[ExportInterface], Service]
@@ -65,6 +101,7 @@ class Launart:
     def __init__(self):
         self.launchables = {}
         self._service_bind = {}
+        self.tasks = {}
         self.status = ManagerStatus()
 
     def add_launchable(self, launchable: Launchable):
@@ -72,7 +109,9 @@ class Launart:
             raise ValueError(f"Launchable {launchable.id} already exists.")
         self.launchables[launchable.id] = launchable
         if self.taskgroup is not None:
-            pass # TODO: sideload prepare.
+            assert self.taskgroup.blocking_task is not None
+            loop = self.taskgroup.blocking_task.get_loop()
+            loop.create_task(self._sideload_prepare(launchable))
 
     def get_launchable(self, id: str):
         if id not in self.launchables:
@@ -82,6 +121,8 @@ class Launart:
     def remove_launchable(self, id: str):
         if id not in self.launchables:
             raise ValueError(f"Launchable {id} does not exists.")
+        if self.taskgroup is not None:
+            raise RuntimeError("cannot remove launchable while taskgroup is running.")
         del self.launchables[id]
 
     def _update_service_bind(self):
@@ -108,66 +149,85 @@ class Launart:
             raise ValueError(f"{interface_type} is not supported.")
         return self._service_bind[interface_type].get_interface(interface_type)
 
-    async def launch(self):
-        logger.info(f"launchable components count: {len(self.launchables)}")
-        logger.info(f"launch all components as async task...")
+    def _get_task(self, launchable_id: str):
+        if self.taskgroup is None:
+            raise ValueError("Taskgroup is not initialized.")
+        for key, task in self.tasks.items():
+            if key == launchable_id:
+                return task
 
+    async def _sideload_prepare(self, launchable: Launchable):
+        if TYPE_CHECKING:
+            assert self.taskgroup is not None
+        if "preparing" not in launchable.stages:
+            return
+        if not set(self.launchables.keys()).issuperset(launchable.required):
+            raise ValueError(
+                f"{launchable.id} requires {launchable.required} but {set(self.launchables.keys()) - launchable.required} are missing."
+            )
+
+        logger.info(f"sideload {launchable.id} enter the workflow")
+
+        # shallow status to avoid wrong judgement to application's current status
+
+        local_status = ManagerStatus()
+        shallow_self = cast(Launart, override(self, {"status": local_status}))
+        launchable.manager = shallow_self
+
+        loop = asyncio.get_running_loop()
+        task = loop.create_task(launchable.launch(shallow_self), name=launchable.id)
+        task.add_done_callback(partial(_launchable_task_done_callback, self))
+        self.tasks[launchable.id] = task
+
+        local_status.stage = "preparing"
+        if launchable.status.stage != "waiting-for-prepare":
+            logger.info(f"waiting sideload {launchable.id} for prepare")
+            await asyncio.wait(
+                [task, loop.create_task(launchable.status.wait_for("waiting-for-prepare"))],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+        logger.info(f"start preparing for sideload {launchable.id}")
+
+        launchable.status.stage = "preparing"
+        await asyncio.wait(
+            [task, loop.create_task(launchable.status.wait_for("prepared"))], return_when=asyncio.FIRST_COMPLETED
+        )
+
+        logger.info(f"sideload {launchable.id} prepared, join the taskgroup")
+        self.taskgroup.add_coroutine(
+            asyncio.wait(
+                [task, loop.create_task(launchable.status.wait_for("blocking-completed", "finished"))],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        )
+        local_status.stage = "blocking"
+        launchable.manager = self
+
+    async def launch(self):  # sourcery skip: low-code-quality
         if self.status.stage is not None:
             logger.error("detected incorrect ownership, launart may already running.")
             return
 
-        for launchable in self.launchables.values():
-            launchable.ensure_manager(self)
-
-        _bind = {_id: _component for _id, _component in self.launchables.items()}
-        tasks = {
-            _id: asyncio.create_task(_component.launch(self), name=_id) for _id, _component in self.launchables.items()
-        }
-
-        def task_done_cb(t: asyncio.Task):
-            exc = t.exception()
-            if exc:
-                logger.opt(exception=exc).error(
-                    f"[{t.get_name()}] raised a exception.",
-                    alt=f"[red bold]component [magenta]{t.get_name()}[/magenta] raised a exception.",
-                )
-                return
-
-            component = _bind[t.get_name()]
-            if self.status.preparing:
-                if "preparing" in component.stages:
-                    if component.status.prepared:
-                        logger.info(f"component {t.get_name()} reported prepare completed.")
-                    else:
-                        logger.warning(f"component {t.get_name()} defined preparing, but exited before status updating.")
-            elif self.status.blocking:
-                if "cleanup" in component.stages:
-                    logger.warning(f"component {t.get_name()} blocking exited without cleanup.")
-                else:
-                    logger.success(f"component {t.get_name()} finished.")
-            elif self.status.cleaning:
-                if "cleanup" in component.stages:
-                    if component.status.finished:
-                        logger.success(f"component {t.get_name()} finished.")
-                    else:
-                        logger.error(
-                            f"component {t.get_name()} defined cleanup, but task completed without reporting."
-                        )
-            logger.info(
-                f"[{t.get_name()}] running completed.",
-                alt=f"\\[[magenta]{t.get_name()}[/magenta]] running completed.",
-            )
-            #self.get_launchable(t.get_name()).status.stage = "finished"
-
-        for task in tasks.values():
-            task.add_done_callback(task_done_cb)
+        logger.info(f"launchable components count: {len(self.launchables)}")
+        logger.info("launch all components as async task...")
 
         loop = asyncio.get_running_loop()
+        as_task = loop.create_task
+        self.tasks = {}
+
+        for launchable in self.launchables.values():
+            launchable.ensure_manager(self)
+            task = loop.create_task(launchable.launch(self), name=launchable.id)
+            task.add_done_callback(partial(_launchable_task_done_callback, self))
+            self.tasks[launchable.id] = task
+
         self.status.stage = "preparing"
         for k, v in self.launchables.items():
             if "preparing" in v.stages and v.status.stage != "waiting-for-prepare":
-                await wait_fut(
-                    [tasks[k], v.status.wait_for("waiting-for-prepare")], return_when=asyncio.FIRST_COMPLETED
+                await asyncio.wait(
+                    [self.tasks[k], as_task(v.status.wait_for("waiting-for-prepare"))],
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
         for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
             preparing_tasks = []
@@ -176,7 +236,7 @@ class Launart:
                     i.status.stage = "preparing"
                     preparing_tasks.append(
                         asyncio.wait(
-                            [tasks[i.id], loop.create_task(i.status.wait_for("prepared"))],
+                            [self.tasks[i.id], as_task(i.status.wait_for("prepared"))],
                             return_when=asyncio.FIRST_COMPLETED,
                         )
                     )
@@ -194,7 +254,7 @@ class Launart:
         self.taskgroup = FlexibleTaskGroup()
         blocking_tasks = [
             asyncio.wait(
-                [tasks[i.id], loop.create_task(i.status.wait_for("blocking-completed", "finished"))],
+                [self.tasks[i.id], as_task(i.status.wait_for("blocking-completed", "finished"))],
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for i in self.launchables.values()
@@ -213,8 +273,9 @@ class Launart:
             self.status.stage = "cleaning"
             for k, v in self.launchables.items():
                 if "cleanup" in v.stages and v.status.stage != "waiting-for-cleanup":
-                    await wait_fut(
-                        [tasks[k], v.status.wait_for("waiting-for-cleanup")], return_when=asyncio.FIRST_COMPLETED
+                    await asyncio.wait(
+                        [self.tasks[k], as_task(v.status.wait_for("waiting-for-cleanup"))],
+                        return_when=asyncio.FIRST_COMPLETED,
                     )
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
                 cleaning_tasks = []
@@ -223,7 +284,7 @@ class Launart:
                         i.status.stage = "cleanup"
                         cleaning_tasks.append(
                             asyncio.wait(
-                                [tasks[i.id], loop.create_task(i.status.wait_for("finished"))],
+                                [self.tasks[i.id], as_task(i.status.wait_for("finished"))],
                                 return_when=asyncio.FIRST_COMPLETED,
                             )
                         )
@@ -237,7 +298,10 @@ class Launart:
 
             self.status.stage = "finished"
             logger.info("cleanup stage finished, now waits for launchable tasks' finale.", style="green bold")
-            await wait_fut([i for i in tasks.values() if not i.done()])
+
+            finale_tasks = [i for i in self.tasks.values() if not i.done()]
+            if finale_tasks:
+                await asyncio.wait(finale_tasks)
             logger.warning("all launch task finished.", style="green bold")
 
     def launch_blocking(self, *, loop: Optional[asyncio.AbstractEventLoop] = None):
@@ -270,6 +334,8 @@ class Launart:
         self.status.exiting = True
         if self.taskgroup is not None:
             self.taskgroup.stop = True
+            if self.taskgroup.blocking_task is not None:
+                self.taskgroup.blocking_task.cancel()
         if not main_task.done():
             main_task.cancel()
             # wakeup loop if it is blocked by select() with long timeout

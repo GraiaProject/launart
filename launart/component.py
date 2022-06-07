@@ -3,9 +3,8 @@ from __future__ import annotations
 import asyncio
 from abc import ABCMeta, abstractmethod
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, List, Optional, Set, Union, cast
+from typing import TYPE_CHECKING, List, Optional, Set, Union
 
-from loguru import logger
 from statv import Stats, Statv
 
 try:
@@ -17,7 +16,16 @@ if TYPE_CHECKING:
     from launart.manager import Launart
 
 U_Stage = Union[
-    Literal["waiting-for-prepare", "preparing", "prepared", "blocking", "blocking-completed", "waiting-for-cleanup", "cleanup", "finished"],
+    Literal[
+        "waiting-for-prepare",
+        "preparing",
+        "prepared",
+        "blocking",
+        "blocking-completed",
+        "waiting-for-cleanup",
+        "cleanup",
+        "finished",
+    ],
     None,
 ]
 STAGE_STAT = {
@@ -32,7 +40,17 @@ STAGE_STAT = {
     "finished": {None},
 }
 # for runtime check:
-STATS = [None, "waiting-for-prepare", "preparing", "prepared", "blocking", "blocking-completed", "waiting-for-cleanup", "cleanup", "finished"]
+STATS = [
+    None,
+    "waiting-for-prepare",
+    "preparing",
+    "prepared",
+    "blocking",
+    "blocking-completed",
+    "waiting-for-cleanup",
+    "cleanup",
+    "finished",
+]
 
 
 class LaunchableStatus(Statv):
@@ -64,6 +82,8 @@ class LaunchableStatus(Statv):
         self.stage = None
 
     async def wait_for(self, *stages: U_Stage):
+        if not stages:
+            return
         while self.stage not in stages:
             await self.wait_for_update()
 
@@ -138,11 +158,11 @@ class Launchable(metaclass=ABCMeta):
         if self.manager is None:
             raise RuntimeError("attempted to set stage of a launchable without a manager.")
         launchables = [self.manager.get_launchable(id) for id in launchable_id]
-        while any(launchable.status.stage not in STATS[STATS.index(stage):] for launchable in launchables):
-            print([(i.id, i.status.stage) for i in launchables])
+        while any(launchable.status.stage not in STATS[STATS.index(stage) :] for launchable in launchables):
+            # print([(i.id, i.status.stage) for i in launchables])
             await asyncio.wait(
                 [launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage],
-                return_when=asyncio.FIRST_COMPLETED
+                return_when=asyncio.FIRST_COMPLETED,
             )
 
     @abstractmethod
