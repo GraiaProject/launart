@@ -135,7 +135,7 @@ class Launchable(metaclass=ABCMeta):
         elif stage == "cleanup":
             if "waiting-for-cleanup" not in STAGE_STAT[self.status.stage]:
                 raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-cleanup")
-            await self.manager.status.wait_for_cleaning()
+            await self.manager.status.wait_for_cleaning(current=self.id)
             self.status.stage = "waiting-for-cleanup"
             await self.status.wait_for("cleanup")
             yield

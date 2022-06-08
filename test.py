@@ -51,6 +51,11 @@ class Test2(Launchable):
             manager.add_launchable(TestSideload())
             await asyncio.sleep(3)
             print("unblocking 2")
+            #await asyncio.sleep(1)
+            await manager.launchables["test_sideload"].status.wait_for("blocking")
+            print('sideload in blocking, test for active cleanup')
+            manager.remove_launchable("test_sideload")
+            await asyncio.sleep(10)
 
         async with self.stage("cleanup"):
             print("cleanup2")

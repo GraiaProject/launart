@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from functools import partial
 from typing import TYPE_CHECKING, Dict, Literal, Optional, Type, cast
@@ -5,7 +7,7 @@ from typing import TYPE_CHECKING, Dict, Literal, Optional, Type, cast
 from loguru import logger
 from statv import Stats, Statv
 
-from launart._sideload import override
+from launart._sideload import FutureMark, override
 from launart.component import Launchable, resolve_requirements
 from launart.service import ExportInterface, Service, TInterface
 from launart.utilles import FlexibleTaskGroup, priority_strategy
@@ -30,7 +32,7 @@ def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):
             else:
                 logger.warning(f"component {t.get_name()} defined preparing, but exited before status updating.")
     elif mgr.status.blocking:
-        if "cleanup" in component.stages:
+        if "cleanup" in component.stages and component.status.stage != "finished":
             logger.warning(f"component {t.get_name()} blocking exited without cleanup.")
         else:
             logger.success(f"component {t.get_name()} finished.")
@@ -69,6 +71,16 @@ class ManagerStatus(Statv):
     def cleaning(self) -> bool:
         return self.stage == "cleaning"
 
+    async def wait_for_update(self, *, current: str | None = None, stage: U_ManagerStage | None = None):
+        waiter = asyncio.Future()
+        if current is not None:
+            waiter.add_done_callback(FutureMark(current, stage))
+        self._waiters.append(waiter)
+        try:
+            return await waiter
+        finally:
+            self._waiters.remove(waiter)
+
     async def wait_for_preparing(self):
         while self.stage != "preparing":
             await self.wait_for_update()
@@ -77,13 +89,13 @@ class ManagerStatus(Statv):
         while self.stage != "blocking":
             await self.wait_for_update()
 
-    async def wait_for_cleaning(self):
+    async def wait_for_cleaning(self, *, current: str | None = None):
         while self.stage != "cleaning":
-            await self.wait_for_update()
+            await self.wait_for_update(current=current, stage="cleaning")
 
-    async def wait_for_finished(self):
+    async def wait_for_finished(self, *, current: str | None = None):
         while self.stage != "finished":
-            await self.wait_for_update()
+            await self.wait_for_update(current=current, stage="finished")
 
     async def wait_for_sigexit(self):
         while self.stage in {"preparing", "blocking"} and not self.exiting:
@@ -118,17 +130,35 @@ class Launart:
             raise ValueError(f"Launchable {id} does not exists.")
         return self.launchables[id]
 
-    def remove_launchable(self, id: str):
+    def remove_launchable(self, id: str, *, unsafe: bool = False):
         if id not in self.launchables:
             raise ValueError(f"Launchable {id} does not exists.")
         if self.taskgroup is not None:
-            raise RuntimeError("cannot remove launchable while taskgroup is running.")
-        # TODO: unsafe remove on runtime
-        del self.launchables[id]
+            assert self.taskgroup.blocking_task is not None
+            loop = self.taskgroup.blocking_task.get_loop()
+
+            launchable = self.launchables[id]
+
+            if launchable.status.stage not in {"prepared", "blocking", "blocking-completed", "waiting-for-cleanup"}:
+                raise RuntimeError(
+                    f"{launchable.id} obtains invalid stats to sideload active release, it's {launchable.status.stage}"
+                )
+
+            # check requirements status
+            if not unsafe:
+                layers = resolve_requirements(set(self.launchables.values()))
+                assert layers
+                if launchable not in layers[0]:
+                    raise RuntimeError("")
+
+            loop.create_task(self._sideload_cleanup(launchable))
+        else:
+            del self.launchables[id]
 
     def _update_service_bind(self):
         self._service_bind = priority_strategy(
-            [i for i in self.launchables.values() if isinstance(i, Service)], lambda a: a.supported_interface_types
+            [i for i in self.launchables.values() if isinstance(i, Service)],
+            lambda a: a.supported_interface_types,
         )
 
     def get_service(self, id: str) -> Service:
@@ -141,8 +171,8 @@ class Launart:
         self.add_launchable(service)
         self._update_service_bind()
 
-    def remove_service(self, service: Service):
-        self.remove_launchable(service.id)
+    def remove_service(self, service: Service, *, unsafe: bool = False):
+        self.remove_launchable(service.id, unsafe=unsafe)
         self._update_service_bind()
 
     def get_interface(self, interface_type: Type[TInterface]) -> TInterface:
@@ -184,7 +214,10 @@ class Launart:
         if launchable.status.stage != "waiting-for-prepare":
             logger.info(f"waiting sideload {launchable.id} for prepare")
             await asyncio.wait(
-                [task, loop.create_task(launchable.status.wait_for("waiting-for-prepare"))],
+                [
+                    task,
+                    loop.create_task(launchable.status.wait_for("waiting-for-prepare")),
+                ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
@@ -192,18 +225,72 @@ class Launart:
 
         launchable.status.stage = "preparing"
         await asyncio.wait(
-            [task, loop.create_task(launchable.status.wait_for("prepared"))], return_when=asyncio.FIRST_COMPLETED
+            [task, loop.create_task(launchable.status.wait_for("prepared"))],
+            return_when=asyncio.FIRST_COMPLETED,
         )
 
         logger.info(f"sideload {launchable.id} prepared, join the taskgroup")
         self.taskgroup.add_coroutine(
             asyncio.wait(
-                [task, loop.create_task(launchable.status.wait_for("blocking-completed", "finished"))],
+                [
+                    task,
+                    loop.create_task(launchable.status.wait_for("blocking-completed", "finished")),
+                ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
         )
         local_status.stage = "blocking"
         launchable.manager = self
+
+    async def _sideload_cleanup(self, launchable: Launchable):
+        if TYPE_CHECKING:
+            assert self.taskgroup is not None
+        if "cleanup" not in launchable.stages:
+            return
+
+        logger.info(f"sideload {launchable.id} enter the cleanup workflow before application general cleanup")
+
+        loop = asyncio.get_running_loop()
+        task = self.tasks[launchable.id]
+
+        local_status = ManagerStatus()
+        shallow_self = cast(Launart, override(self, {"status": local_status}))
+        launchable.manager = shallow_self
+
+        # take over existed futures
+        owned_waiters = [fut for fut in self.status._waiters if FutureMark in {type(cb) for cb, ctx in fut._callbacks}]
+
+        local_status._waiters.extend(owned_waiters)
+        local_status.update_multi(
+            {
+                ManagerStatus.stage: "cleaning",  # type: ignore
+                ManagerStatus.exiting: True,  # type: ignore
+            }
+        )
+
+        if launchable.status.stage != "waiting-for-cleanup":
+            await asyncio.wait(
+                [
+                    task,
+                    loop.create_task(launchable.status.wait_for("waiting-for-cleanup")),
+                ],
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+
+        launchable.status.stage = "cleanup"
+        await asyncio.wait(
+            [
+                task,
+                loop.create_task(launchable.status.wait_for("finished")),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
+        )
+        logger.info(f"sideload {launchable.id} completed active cleanup, waits for finale.")
+        if not task.done() or not task.cancelled():
+            await task
+        logger.info(f"sideload {launchable.id} native task done.")
+        del self.tasks[launchable.id]
+        del self.launchables[launchable.id]
 
     async def launch(self):  # sourcery skip: low-code-quality
         if self.status.stage is not None:
@@ -255,7 +342,10 @@ class Launart:
         self.taskgroup = FlexibleTaskGroup()
         blocking_tasks = [
             asyncio.wait(
-                [self.tasks[i.id], as_task(i.status.wait_for("blocking-completed", "finished"))],
+                [
+                    self.tasks[i.id],
+                    as_task(i.status.wait_for("blocking-completed", "finished")),
+                ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
             for i in self.launchables.values()
@@ -275,7 +365,10 @@ class Launart:
             for k, v in self.launchables.items():
                 if "cleanup" in v.stages and v.status.stage != "waiting-for-cleanup":
                     await asyncio.wait(
-                        [self.tasks[k], as_task(v.status.wait_for("waiting-for-cleanup"))],
+                        [
+                            self.tasks[k],
+                            as_task(v.status.wait_for("waiting-for-cleanup")),
+                        ],
                         return_when=asyncio.FIRST_COMPLETED,
                     )
             for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
@@ -285,7 +378,10 @@ class Launart:
                         i.status.stage = "cleanup"
                         cleaning_tasks.append(
                             asyncio.wait(
-                                [self.tasks[i.id], as_task(i.status.wait_for("finished"))],
+                                [
+                                    self.tasks[i.id],
+                                    as_task(i.status.wait_for("finished")),
+                                ],
                                 return_when=asyncio.FIRST_COMPLETED,
                             )
                         )
@@ -298,7 +394,10 @@ class Launart:
                     )
 
             self.status.stage = "finished"
-            logger.info("cleanup stage finished, now waits for launchable tasks' finale.", style="green bold")
+            logger.info(
+                "cleanup stage finished, now waits for launchable tasks' finale.",
+                style="green bold",
+            )
 
             finale_tasks = [i for i in self.tasks.values() if not i.done()]
             if finale_tasks:
