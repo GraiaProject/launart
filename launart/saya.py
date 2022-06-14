@@ -40,7 +40,7 @@ class LaunartBehaviour(Behaviour):
             return
         return True
 
-    def uninstall(self, cube: Cube[ServiceSchema]):
+    def release(self, cube: Cube[ServiceSchema]):
         if isinstance(cube.metaclass, ServiceSchema):
             self.manager.remove_service(cube.content, unsafe=self.allow_unsafe)
         elif isinstance(cube.metaclass, Launchable):
@@ -48,3 +48,5 @@ class LaunartBehaviour(Behaviour):
         else:
             return
         return True
+
+    uninstall = release

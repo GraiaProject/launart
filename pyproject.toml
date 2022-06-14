@@ -1,6 +1,6 @@
 [project]
 name = "launart"
-version = "0.4.1"
+version = "0.4.2"
 description = ""
 authors = [
     {name = "GreyElaina", email = "GreyElaina@outlook.com"},
@@ -15,14 +15,13 @@ license = {text = "MIT"}
 
 [project.optional-dependencies]
 saya = [
-    "graia-saya>=0.0.15",
+    "graia-saya>=0.0.16",
 ]
 
 [tool.pdm]
 [tool.pdm.dev-dependencies]
 dev = [
     "richuru>=0.1.0",
-    "graia-saya>=0.0.15",
 ]
 
 [build-system]
