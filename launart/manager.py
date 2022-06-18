@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import asyncio
+from contextvars import ContextVar
 from functools import partial
-from typing import TYPE_CHECKING, Dict, Literal, Optional, Type, cast
+from typing import TYPE_CHECKING, ClassVar, Dict, Literal, Optional, Type, cast
 
 from loguru import logger
 from statv import Stats, Statv
@@ -13,7 +14,6 @@ from launart.service import ExportInterface, Service, TInterface
 from launart.utilles import FlexibleTaskGroup, priority_strategy
 
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
-
 
 def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):
     exc = t.exception()
@@ -110,11 +110,17 @@ class Launart:
 
     _service_bind: Dict[Type[ExportInterface], Service]
 
+    _context: ClassVar[ContextVar[Launart]] = ContextVar("launart._context")
+
     def __init__(self):
         self.launchables = {}
         self._service_bind = {}
         self.tasks = {}
         self.status = ManagerStatus()
+
+    @classmethod
+    def current(cls) -> Launart:
+        return cls._context.get()
 
     def add_launchable(self, launchable: Launchable):
         if launchable.id in self.launchables:
@@ -293,6 +299,7 @@ class Launart:
         del self.launchables[launchable.id]
 
     async def launch(self):  # sourcery skip: low-code-quality
+        _token = self._context.set(self)
         if self.status.stage is not None:
             logger.error("detected incorrect ownership, launart may already running.")
             return
@@ -402,6 +409,7 @@ class Launart:
             finale_tasks = [i for i in self.tasks.values() if not i.done()]
             if finale_tasks:
                 await asyncio.wait(finale_tasks)
+            self._context.reset(_token)
             logger.warning("all launch task finished.", style="green bold")
 
     def launch_blocking(self, *, loop: Optional[asyncio.AbstractEventLoop] = None):
