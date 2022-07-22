@@ -88,8 +88,18 @@ class LaunchableStatus(Statv):
             await self.wait_for_update()
 
 
-STAGE_MAPPING = {"prepare": "preparing", "blocking": "blocking", "cleanup": "cleaning", "finished": "finished"}
-STAGE_MAPPING_REVERSED = {"preparing": "prepare", "blocking": "blocking", "cleaning": "cleanup", "finished": "finished"}
+STAGE_MAPPING = {
+    "prepare": "preparing",
+    "blocking": "blocking",
+    "cleanup": "cleaning",
+    "finished": "finished",
+}
+STAGE_MAPPING_REVERSED = {
+    "preparing": "prepare",
+    "blocking": "blocking",
+    "cleaning": "cleanup",
+    "finished": "finished",
+}
 
 
 class Launchable(metaclass=ABCMeta):
@@ -111,7 +121,7 @@ class Launchable(metaclass=ABCMeta):
         ...
 
     def ensure_manager(self, manager: Launart):
-        if self.manager is not None:
+        if self.manager is not None and self.manager is not manager:
             raise RuntimeError("this launchable attempted to be mistaken a wrong ownership of launart/manager.")
         self.manager = manager
 
@@ -149,7 +159,7 @@ class Launchable(metaclass=ABCMeta):
             yield
             self.status.stage = "blocking-completed"
         else:
-            raise ValueError(f"unexpected stage entering: {stage}(unknown define)")
+            raise ValueError(f"entering unexpected stage: {stage}(unknown definition)")
 
     async def wait_for_required(self, stage: U_Stage = "prepared"):
         await self.wait_for(stage, *self.required)

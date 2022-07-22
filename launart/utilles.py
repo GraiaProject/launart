@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import enum
 from typing import (
     Callable,
     Coroutine,
@@ -8,6 +9,7 @@ from typing import (
     Hashable,
     Iterable,
     List,
+    Literal,
     Optional,
     Set,
     Tuple,
@@ -18,13 +20,22 @@ from typing import (
 T = TypeVar("T")
 H = TypeVar("H", bound=Hashable)
 
+
+class _Unmarked(enum.Enum):
+    UNMARKED = object()
+
+
+UNMARKED = _Unmarked.UNMARKED
+
+# "Unmarked" is a great way of replacing ellipsis.
+
 PriorityType = Union[
     Set[T],
-    Dict[T, Union[int, float]],
+    Dict[T, float],
     Tuple[
         Union[
             Set[T],
-            Dict[T, Union[int, float]],
+            Dict[T, float],
         ],
         ...,
     ],
@@ -38,47 +49,42 @@ def priority_strategy(
         PriorityType[H],
     ],
 ) -> Dict[H, T]:
-    result = {}
-    _cache = {}
+    result: Dict[H, T] = {}
+    _priority_mem: Dict[H, float | Literal[UNMARKED]] = {}
 
-    def _raise_conflict(content):
-        raise ValueError(
-            f"{content} which is an unlocated item is already existed, and it conflicts with {result[content]}"
-        )
-
-    def _raise_existed(content):
-        raise ValueError(f"{content} is already existed, and it conflicts with {result[content]}, an unlocated item.")
-
-    def _handle(pattern):
-        if isinstance(pattern, Set):
+    def _handle(pattern: PriorityType[H]) -> None:
+        """Handle an actual pattern."""
+        if isinstance(pattern, set):
+            # Pattern has unknown priorities.
             for content in pattern:
-                if content in _cache:
-                    _raise_conflict(content)
-                _cache[content] = ...
+                if content in _priority_mem:
+                    raise ValueError(f"{content} conflicts with {result[content]}")
+                _priority_mem[content] = UNMARKED
                 result[content] = item
-        elif isinstance(pattern, Dict):
+
+        elif isinstance(pattern, dict):
             for content, priority in pattern.items():
-                if content in _cache:
-                    if _cache[content] is ...:
-                        _raise_existed(content)
-                    if priority is ...:
-                        _raise_conflict(content)
-                    if _cache[content] < priority:
-                        _cache[content] = priority
+                if content in _priority_mem:
+                    current_priority: float | Literal[_Unmarked.UNMARKED] = _priority_mem[content]
+                    if current_priority is UNMARKED or priority is UNMARKED:
+                        raise ValueError(f"Unable to determine priority order: {content}, {result[content]}.")
+                    if current_priority < priority:
+                        _priority_mem[content] = priority
                         result[content] = item
                 else:
-                    _cache[content] = priority
+                    _priority_mem[content] = priority
                     result[content] = item
+
         else:
             raise TypeError(f"{pattern} is not a valid pattern.")
 
     for item in items:
-        pattern = getter(item)
+        pattern: PriorityType[H] = getter(item)
         if isinstance(pattern, (dict, set)):
             _handle(pattern)
         elif isinstance(pattern, tuple):
-            for subpattern in pattern:
-                _handle(subpattern)
+            for sub_pattern in pattern:
+                _handle(sub_pattern)
         else:
             raise TypeError(f"{pattern} is not a valid pattern.")
     return result
