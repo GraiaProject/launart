@@ -153,10 +153,9 @@ class Launart:
 
             # check requirements status
             if not unsafe:
-                layers = resolve_requirements(set(self.launchables.values()))
-                assert layers
-                if launchable not in layers[0]:
-                    raise RuntimeError("")
+                layers = resolve_requirements(self.launchables.values())
+                if not layers or launchable not in layers[0]:
+                    raise RuntimeError
 
             loop.create_task(self._sideload_cleanup(launchable))
         else:
@@ -327,7 +326,10 @@ class Launart:
                     [self.tasks[k], as_task(v.status.wait_for("waiting-for-prepare"))],
                     return_when=asyncio.FIRST_COMPLETED,
                 )
-        for layer, components in enumerate(resolve_requirements(set(self.launchables.values()))):
+        for layer, components in enumerate(
+            resolve_requirements(self.launchables.values()),
+            start=1,
+        ):
             preparing_tasks = []
             for i in components:
                 if "preparing" in i.stages:
@@ -381,7 +383,10 @@ class Launart:
                         ],
                         return_when=asyncio.FIRST_COMPLETED,
                     )
-            for layer, components in enumerate(reversed(resolve_requirements(set(self.launchables.values())))):
+            for layer, components in enumerate(
+                resolve_requirements(self.launchables.values(), reverse=True),
+                start=1,
+            ):
                 cleaning_tasks = []
                 for i in components:
                     if "cleanup" in i.stages:

@@ -3,7 +3,7 @@ from __future__ import annotations
 import asyncio
 from abc import ABCMeta, abstractmethod
 from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, List, Optional, Set, Union
+from typing import TYPE_CHECKING, Iterable, List, Optional, Set, Union
 
 from statv import Stats, Statv
 
@@ -180,22 +180,23 @@ class Launchable(metaclass=ABCMeta):
         pass
 
 
-class RequirementResolveFailed(Exception):
+class RequirementResolveFailed(ValueError):
     pass
 
 
-def resolve_requirements(
-    components: Set[Launchable],
-) -> List[Set[Launchable]]:
-    resolved = set()
-    result = []
-    while components:
-        layer = {component for component in components if component.required.issubset(resolved)}
+def resolve_requirements(components: Iterable[Launchable], reverse: bool = False) -> List[Set[Launchable]]:
+    resolved_id: Set[str] = set()
+    unresolved: Set[Launchable] = set(components)
+    result: List[Set[Launchable]] = []
+    while unresolved:
+        layer = {component for component in unresolved if resolved_id > component.required}
 
         if layer:
-            components -= layer
-            resolved.update(component.id for component in layer)
+            unresolved -= layer
+            resolved_id.update(component.id for component in layer)
             result.append(layer)
         else:
-            raise RequirementResolveFailed
+            raise RequirementResolveFailed(unresolved)
+    if reverse:
+        result.reverse()
     return result
