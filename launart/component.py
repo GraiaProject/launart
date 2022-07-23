@@ -175,7 +175,7 @@ def resolve_requirements(components: Iterable[Launchable], reverse: bool = False
     unresolved: Set[Launchable] = set(components)
     result: List[Set[Launchable]] = []
     while unresolved:
-        layer = {component for component in unresolved if resolved_id > component.required}
+        layer = {component for component in unresolved if resolved_id.issuperset(component.required)}
 
         if layer:
             unresolved -= layer
