@@ -88,20 +88,6 @@ class LaunchableStatus(Statv):
             await self.wait_for_update()
 
 
-STAGE_MAPPING = {
-    "prepare": "preparing",
-    "blocking": "blocking",
-    "cleanup": "cleaning",
-    "finished": "finished",
-}
-STAGE_MAPPING_REVERSED = {
-    "preparing": "prepare",
-    "blocking": "blocking",
-    "cleaning": "cleanup",
-    "finished": "finished",
-}
-
-
 class Launchable(metaclass=ABCMeta):
     id: str
     status: LaunchableStatus
@@ -117,7 +103,7 @@ class Launchable(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def stages(self) -> Set[Literal["prepare", "blocking", "cleanup"]]:
+    def stages(self) -> Set[Literal["preparing", "blocking", "cleanup"]]:
         ...
 
     def ensure_manager(self, manager: Launart):
@@ -142,14 +128,6 @@ class Launchable(metaclass=ABCMeta):
             await self.status.wait_for("preparing")
             yield
             self.status.stage = "prepared"
-        elif stage == "cleanup":
-            if "waiting-for-cleanup" not in STAGE_STAT[self.status.stage]:
-                raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-cleanup")
-            await self.manager.status.wait_for_cleaning(current=self.id)
-            self.status.stage = "waiting-for-cleanup"
-            await self.status.wait_for("cleanup")
-            yield
-            self.status.stage = "finished"
         elif stage == "blocking":
             if "blocking" not in STAGE_STAT[self.status.stage]:
                 raise ValueError(f"unexpected stage entering: {self.status.stage} -> blocking")
@@ -158,6 +136,14 @@ class Launchable(metaclass=ABCMeta):
             self.status.stage = "blocking"
             yield
             self.status.stage = "blocking-completed"
+        elif stage == "cleanup":
+            if "waiting-for-cleanup" not in STAGE_STAT[self.status.stage]:
+                raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-cleanup")
+            await self.manager.status.wait_for_cleaning(current=self.id)
+            self.status.stage = "waiting-for-cleanup"
+            await self.status.wait_for("cleanup")
+            yield
+            self.status.stage = "finished"
         else:
             raise ValueError(f"entering unexpected stage: {stage}(unknown definition)")
 
