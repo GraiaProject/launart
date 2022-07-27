@@ -303,7 +303,7 @@ class Launart:
         if self.status.stage is not None:
             logger.error("Incorrect ownership, launart is already running.")
             return
-
+        self.status.exiting = False
         logger.info(
             f"Launching {len(self.launchables)} components as async task...",
             alt=f"Launching [magenta]{len(self.launchables)}[/] components as async task...",
@@ -369,10 +369,9 @@ class Launart:
                 await self.task_group.wait()
         except asyncio.CancelledError:
             logger.info("Blocking phase cancelled by user.", style="red bold")
-            self.status.exiting = True
         finally:
+            self.status.exiting = True
             logger.info("Entering cleanup phase.", style="yellow bold")
-
             self.status.stage = "cleaning"
             for k, v in self.launchables.items():
                 if "cleanup" in v.stages and v.status.stage != "waiting-for-cleanup":
@@ -450,10 +449,12 @@ class Launart:
         if sigint_handler is not None and signal.getsignal(signal.SIGINT) is sigint_handler:
             signal.signal(signal.SIGINT, signal.default_int_handler)
 
-        loop.run_until_complete(loop.shutdown_asyncgens())
-        loop.run_until_complete(loop.shutdown_default_executor())
-
-        logger.success("Asyncio shutdown complete.", style="green bold")
+        try:
+            self._cancel_tasks(loop)
+            loop.run_until_complete(loop.shutdown_asyncgens())
+            loop.run_until_complete(loop.shutdown_default_executor())
+        finally:
+            logger.success("asyncio shutdown complete.", style="green bold")
 
     def _on_sigint(self, _, __, main_task: asyncio.Task):
         self.status.exiting = True
@@ -466,3 +467,20 @@ class Launart:
             # wakeup loop if it is blocked by select() with long timeout
             main_task._loop.call_soon_threadsafe(lambda: None)
             logger.warning("Ctrl-C triggered by user.", style="dark_orange bold")
+
+    @staticmethod
+    def _cancel_tasks(loop: asyncio.AbstractEventLoop):
+        import asyncio
+        import asyncio.tasks
+
+        to_cancel = asyncio.tasks.all_tasks(loop)
+        if to_cancel:
+            for tsk in to_cancel:
+                tsk.cancel()
+            loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
+
+            for task in to_cancel:
+                if task.cancelled():
+                    continue
+                if task.exception() is not None:
+                    logger.opt(exception=task.exception()).error(f"Unhandled exception when shutting down {task}:")
