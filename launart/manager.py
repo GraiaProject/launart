@@ -1,9 +1,21 @@
 from __future__ import annotations
 
 import asyncio
+import signal
 from contextvars import ContextVar
 from functools import partial
-from typing import TYPE_CHECKING, ClassVar, Dict, Literal, Optional, Type, cast
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Iterable,
+    Literal,
+    Optional,
+    Type,
+    cast,
+)
 
 from loguru import logger
 from statv import Stats, Statv
@@ -420,9 +432,13 @@ class Launart:
             self._context.reset(_token)
             logger.success("All launch task finished.", style="green bold")
 
-    def launch_blocking(self, *, loop: Optional[asyncio.AbstractEventLoop] = None):
+    def launch_blocking(
+        self,
+        *,
+        loop: Optional[asyncio.AbstractEventLoop] = None,
+        stop_signal: Iterable[signal.Signals] = (signal.SIGINT,),
+    ):
         import functools
-        import signal
         import threading
 
         loop = loop or asyncio.new_event_loop()
@@ -430,24 +446,26 @@ class Launart:
         logger.info("Starting launart main task...", style="green bold")
 
         launch_task = loop.create_task(self.launch(), name="amnesia-launch")
+        handled_signals: Dict[signal.Signals, Any] = {}
+        signal_handler = functools.partial(self._on_sys_signal, main_task=launch_task)
         if (
             threading.current_thread() is threading.main_thread()
             and signal.getsignal(signal.SIGINT) is signal.default_int_handler
         ):
-            sigint_handler = functools.partial(self._on_sigint, main_task=launch_task)
             try:
-                signal.signal(signal.SIGINT, sigint_handler)
+                for sig in stop_signal:
+                    handled_signals[sig] = signal.getsignal(sig)
+                    signal.signal(sig, signal_handler)
             except ValueError:
                 # `signal.signal` may throw if `threading.main_thread` does
                 # not support signals
-                signal_handler = None
-        else:
-            sigint_handler = None
+                handled_signals.clear()
 
         loop.run_until_complete(launch_task)
 
-        if sigint_handler is not None and signal.getsignal(signal.SIGINT) is sigint_handler:
-            signal.signal(signal.SIGINT, signal.default_int_handler)
+        for sig, handler in handled_signals.items():
+            if signal.getsignal(sig) is signal_handler:
+                signal.signal(sig, handler)
 
         try:
             self._cancel_tasks(loop)
@@ -456,7 +474,7 @@ class Launart:
         finally:
             logger.success("asyncio shutdown complete.", style="green bold")
 
-    def _on_sigint(self, _, __, main_task: asyncio.Task):
+    def _on_sys_signal(self, _, __, main_task: asyncio.Task):
         self.status.exiting = True
         if self.task_group is not None:
             self.task_group.stop = True
