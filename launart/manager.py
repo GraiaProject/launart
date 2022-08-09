@@ -136,6 +136,7 @@ class Launart:
         return cls._context.get()
 
     def add_launchable(self, launchable: Launchable):
+        launchable.ensure_manager(self)
         if launchable.id in self.launchables:
             raise ValueError(f"Launchable {launchable.id} already exists.")
         self.launchables[launchable.id] = launchable
@@ -210,9 +211,9 @@ class Launart:
             assert self.task_group is not None
         if "preparing" not in launchable.stages:
             return
-        if not set(self.launchables.keys()).issuperset(launchable.required):
+        if not set(self.launchables.keys()).issuperset(launchable._required_id):
             raise ValueError(
-                f"Sideload {launchable.id} requires {launchable.required} but {set(self.launchables.keys()) - launchable.required} are missing."
+                f"Sideload {launchable.id} requires {launchable._required_id} but {set(self.launchables.keys()) - launchable._required_id} are missing."
             )
 
         logger.info(f"Sideload {launchable.id}: injecting")
@@ -326,7 +327,6 @@ class Launart:
         self.tasks = {}
 
         for launchable in self.launchables.values():
-            launchable.ensure_manager(self)
             task = loop.create_task(launchable.launch(self), name=launchable.id)
             task.add_done_callback(partial(_launchable_task_done_callback, self))
             self.tasks[launchable.id] = task

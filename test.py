@@ -4,16 +4,42 @@
 import asyncio
 
 from launart import Launart, Launchable
+from launart.service import ExportInterface, Service
 
 art = Launart()
+
+
+class TestInterface(ExportInterface):
+    ...
+
+
+class TestSrv(Service):
+    id = "test_srv"
+    supported_interface_types = {TestInterface}
+
+    @property
+    def required(self) -> set[str]:
+        return set()
+
+    @property
+    def stages(self) -> set[str]:
+        return {"preparing"}
+
+    async def launch(self, manager: Launart):
+        async with self.stage("preparing"):
+            self.interface = TestInterface()
+            print("TestSrv: prepared TestInterface")
+
+    def get_interface(self):
+        return self.interface
 
 
 class TestLaunchable(Launchable):
     id = "test"
 
     @property
-    def required(self) -> set[str]:
-        return set()
+    def required(self):
+        return {TestInterface}
 
     @property
     def stages(self) -> set[str]:
@@ -88,6 +114,7 @@ class TestSideload(Launchable):
             await asyncio.sleep(3)
 
 
+art.add_service(TestSrv())
 art.add_launchable(TestLaunchable())
 art.add_launchable(Test2())
 
