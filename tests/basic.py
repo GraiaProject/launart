@@ -20,5 +20,5 @@ def test_add():
     assert mgr.launchables["component.test"] == lc
     i = interface()
     srv = service("service.test", {i}, [])
-    mgr.add_service(srv)
+    mgr.add_launchable(srv)
     assert mgr.launchables["service.test"] == srv

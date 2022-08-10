@@ -140,28 +140,38 @@ class Launart:
         if launchable.id in self.launchables:
             raise ValueError(f"Launchable {launchable.id} already exists.")
         self.launchables[launchable.id] = launchable
+        if isinstance(launchable, Service):
+            self._update_service_bind()
         if self.task_group is not None:
             assert self.task_group.blocking_task is not None
             loop = self.task_group.blocking_task.get_loop()
             loop.create_task(self._sideload_prepare(launchable))
 
-    def get_launchable(self, id: str):
+    def get_launchable(self, id: str) -> Launchable:
         if id not in self.launchables:
             raise ValueError(f"Launchable {id} does not exists.")
         return self.launchables[id]
 
-    def remove_launchable(self, id: str, *, unsafe: bool = False):
-        if id not in self.launchables:
-            raise ValueError(f"Launchable {id} does not exists.")
+    def get_service(self, id: str) -> Service:
+        launchable = self.get_launchable(id)
+        if not isinstance(launchable, Service):
+            raise ValueError(f"{id} is not a service.")
+        return launchable
+
+    def remove_launchable(self, launchable: str | Launchable, *, unsafe: bool = False):
+        if isinstance(launchable, str):
+            if launchable not in self.launchables:
+                raise ValueError(f"Launchable {id} does not exist.")
+            target = self.launchables[launchable]
+        else:
+            target = launchable
         if self.task_group is not None:
             assert self.task_group.blocking_task is not None
             loop = self.task_group.blocking_task.get_loop()
 
-            launchable = self.launchables[id]
-
-            if launchable.status.stage not in {"prepared", "blocking", "blocking-completed", "waiting-for-cleanup"}:
+            if target.status.stage not in {"prepared", "blocking", "blocking-completed", "waiting-for-cleanup"}:
                 raise RuntimeError(
-                    f"{launchable.id} obtains invalid stats to sideload active release, it's {launchable.status.stage}"
+                    f"{target.id} obtains invalid stats to sideload active release, it's {target.status.stage}"
                 )
 
             # check requirements status
@@ -170,9 +180,11 @@ class Launart:
                 if not layers or launchable not in layers[0]:
                     raise RuntimeError
 
-            loop.create_task(self._sideload_cleanup(launchable))
+            loop.create_task(self._sideload_cleanup(target))
         else:
-            del self.launchables[id]
+            del self.launchables[target.id]
+        if isinstance(target, Service):
+            self._update_service_bind()
 
     def _update_service_bind(self):
         self._service_bind = priority_strategy(
@@ -180,19 +192,8 @@ class Launart:
             lambda a: a.supported_interface_types,
         )
 
-    def get_service(self, id: str) -> Service:
-        launchable = self.get_launchable(id)
-        if not isinstance(launchable, Service):
-            raise ValueError(f"{id} is not a service.")
-        return launchable
-
-    def add_service(self, service: Service):
-        self.add_launchable(service)
-        self._update_service_bind()
-
-    def remove_service(self, service: Service, *, unsafe: bool = False):
-        self.remove_launchable(service.id, unsafe=unsafe)
-        self._update_service_bind()
+    add_service = add_launchable
+    remove_service = remove_launchable
 
     def get_interface(self, interface_type: Type[TInterface]) -> TInterface:
         if interface_type not in self._service_bind:
