@@ -2,8 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import enum
-from typing import (Callable, Coroutine, Dict, Hashable, Iterable, List,
-                    Literal, Optional, Set, Tuple, TypeVar, Union)
+from typing import (
+    Callable,
+    Coroutine,
+    Dict,
+    Hashable,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Set,
+    Tuple,
+    TypeVar,
+    Union,
+)
 
 T = TypeVar("T")
 H = TypeVar("H", bound=Hashable)

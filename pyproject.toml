@@ -19,14 +19,55 @@ saya = [
 ]
 
 [tool.pdm]
+[tool.pdm.scripts]
+test = {composite = ["coverage run -m pytest", "coverage xml", "coverage report"]}
 [tool.pdm.dev-dependencies]
 dev = [
     "richuru>=0.1.0",
     "black>=22.6.0",
     "isort>=5.10.1",
+    "graia-saya~=0.0",
+    "coverage~=6.4",
+    "pytest~=7.1",
+    "pytest-asyncio~=0.19",
 ]
 [tool.black]
 line-length = 120
+
+[tool.isort]
+profile = "black"
+
+[tool.coverage.run]
+branch = true
+source = ["."]
+omit = ["tests/*", "test.py"]
+
+[tool.coverage.report]
+# Regexes for lines to exclude from consideration
+exclude_lines = [
+    # standard pragma
+    "pragma: no cover",
+    # Don't complain if non-runnable code isn't run:
+    "if 0:",
+    "if __name__ == .__main__.:",
+    "if (typing\\.)?TYPE_CHECKING( is True)?:",
+    "\\.\\.\\.",
+    "pass",
+    # Don't complain about abstract methods, they aren't run:
+    "@(abc\\.)?abstractmethod",
+    # Don't complain overload method / functions
+    "@(typing\\.)?overload",
+    # don't complain __repr__ and __str__ and __repr_args__ for representation
+    "def __repr__",
+    "def __str__",
+    "def __repr_args__",
+    "except ImportError:", # Don't complain about import fallback
+]
+
+
 [build-system]
 requires = ["pdm-pep517>=0.12.0"]
 build-backend = "pdm.pep517.api"
+
+[tool.pyright]
+exclude = ["__pypackages__"]
