@@ -14,6 +14,7 @@ except ImportError:
 
 if TYPE_CHECKING:
     from launart.manager import Launart
+    from launart.service import ExportInterface
 
 U_Stage = Union[
     Literal[
@@ -98,8 +99,26 @@ class Launchable(metaclass=ABCMeta):
 
     @property
     @abstractmethod
-    def required(self) -> Set[str]:
+    def required(self) -> Set[str | type[ExportInterface]]:
         ...
+
+    @property
+    def _required_id(self) -> Set[str]:
+        """Extract ID of combined requirements."""
+        dependencies: Set[str] = set()
+        failed: Set[str | type[ExportInterface]] = set()
+        if self.manager is None:
+            raise RuntimeError("attempted to flatten dependencies without a manager.")
+        for req in self.required:
+            if req not in (self.manager.launchables if isinstance(req, str) else self.manager._service_bind):
+                failed.add(req)
+            elif isinstance(req, str):
+                dependencies.add(req)
+            else:
+                dependencies.add(self.manager._service_bind[req].id)
+        if failed:
+            raise RuntimeError(f"Failed to find following requirements: {failed!r}")
+        return dependencies
 
     @property
     @abstractmethod
@@ -148,14 +167,13 @@ class Launchable(metaclass=ABCMeta):
             raise ValueError(f"entering unexpected stage: {stage}(unknown definition)")
 
     async def wait_for_required(self, stage: U_Stage = "prepared"):
-        await self.wait_for(stage, *self.required)
+        await self.wait_for(stage, *self._required_id)
 
     async def wait_for(self, stage: U_Stage, *launchable_id: str):
         if self.manager is None:
             raise RuntimeError("attempted to set stage of a launchable without a manager.")
         launchables = [self.manager.get_launchable(id) for id in launchable_id]
         while any(launchable.status.stage not in STATS[STATS.index(stage) :] for launchable in launchables):
-            # print([(i.id, i.status.stage) for i in launchables])
             await asyncio.wait(
                 [launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage],
                 return_when=asyncio.FIRST_COMPLETED,
@@ -175,7 +193,7 @@ def resolve_requirements(components: Iterable[Launchable], reverse: bool = False
     unresolved: Set[Launchable] = set(components)
     result: List[Set[Launchable]] = []
     while unresolved:
-        layer = {component for component in unresolved if resolved_id >= component.required}
+        layer = {component for component in unresolved if resolved_id >= component._required_id}
 
         if layer:
             unresolved -= layer
