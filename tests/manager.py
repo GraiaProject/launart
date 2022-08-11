@@ -64,6 +64,7 @@ def test_nothing_complex():
     loop = asyncio.new_event_loop()
     launch_tsk = loop.create_task(mgr.launch())
     loop.run_until_complete(asyncio.sleep(0.02))  # head time
+    assert mgr._get_task("empty")
     wrong_launch = loop.create_task(mgr.launch())
     loop.run_until_complete(asyncio.sleep(0.1))
     mgr._on_sys_signal(None, None, launch_tsk)
@@ -71,6 +72,50 @@ def test_nothing_complex():
     assert wrong_launch.done()
     loop.run_until_complete(launch_tsk)
     mgr._on_sys_signal(None, None, launch_tsk)
+
+
+def test_manager_stat():
+    mgr = Launart()
+
+    class _L(Launchable):
+        id = "test_stat"
+        triggered = False
+
+        @property
+        def stages(self):
+            return {"preparing", "blocking", "cleanup"}
+
+        @property
+        def required(self):
+            return set()
+
+        async def launch(self, _):
+            await asyncio.sleep(0.02)
+            async with self.stage("preparing"):
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.02)
+            async with self.stage("blocking"):
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.02)
+            async with self.stage("cleanup"):
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.02)
+
+    mgr.add_launchable(_L())
+    loop = asyncio.new_event_loop()
+    tasks = []
+    mk_task = loop.create_task
+    tasks.append(mk_task(mgr.status.wait_for_preparing()))
+    loop.run_until_complete(asyncio.sleep(0.01))
+    mk_task(mgr.launch())
+    tasks.append(mk_task(mgr.status.wait_for_blocking()))
+    tasks.append(mk_task(mgr.status.wait_for_cleaning()))
+    loop.run_until_complete(asyncio.sleep(0.02))
+    tasks.append(mk_task(mgr.status.wait_for_sigexit()))
+    tasks.append(mk_task(mgr.status.wait_for_finished()))
+    loop.run_until_complete(asyncio.sleep(0.2))
+    for task in tasks:
+        assert task.done() and not task.cancelled()
 
 
 def test_signal_change_during_running():

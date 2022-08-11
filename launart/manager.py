@@ -107,7 +107,7 @@ class ManagerStatus(Statv):
             await self.wait_for_update(current=current, stage="cleaning")
 
     async def wait_for_finished(self, *, current: str | None = None):
-        while self.stage != "finished":
+        while self.stage not in {"finished", None}:
             await self.wait_for_update(current=current, stage="finished")
 
     async def wait_for_sigexit(self):
@@ -144,7 +144,7 @@ class Launart:
             self._update_service_bind()
         if self.task_group is not None:
             assert self.task_group.blocking_task is not None
-            loop = self.task_group.blocking_task.get_loop()
+            loop = asyncio.get_running_loop()
             loop.create_task(self._sideload_prepare(launchable))
 
     def get_launchable(self, id: str) -> Launchable:
@@ -167,7 +167,7 @@ class Launart:
             target = launchable
         if self.task_group is not None:
             assert self.task_group.blocking_task is not None
-            loop = self.task_group.blocking_task.get_loop()
+            loop = asyncio.get_running_loop()
 
             if target.status.stage not in {"prepared", "blocking", "blocking-completed", "waiting-for-cleanup"}:
                 raise RuntimeError(
