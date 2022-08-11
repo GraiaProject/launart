@@ -155,7 +155,7 @@ class Launart:
     def get_service(self, id: str) -> Service:
         launchable = self.get_launchable(id)
         if not isinstance(launchable, Service):
-            raise ValueError(f"{id} is not a service.")
+            raise TypeError(f"{id} is not a service.")
         return launchable
 
     def remove_launchable(self, launchable: str | Launchable, *, unsafe: bool = False):
@@ -432,6 +432,7 @@ class Launart:
             self.task_group = None
             self._context.reset(_token)
             logger.success("All launch task finished.", style="green bold")
+            self.status.stage = None  # reset status
 
     def launch_blocking(
         self,
@@ -449,15 +450,12 @@ class Launart:
         launch_task = loop.create_task(self.launch(), name="amnesia-launch")
         handled_signals: Dict[signal.Signals, Any] = {}
         signal_handler = functools.partial(self._on_sys_signal, main_task=launch_task)
-        if (
-            threading.current_thread() is threading.main_thread()
-            and signal.getsignal(signal.SIGINT) is signal.default_int_handler
-        ):
+        if threading.current_thread() is threading.main_thread():  # pragma: worst case
             try:
                 for sig in stop_signal:
                     handled_signals[sig] = signal.getsignal(sig)
                     signal.signal(sig, signal_handler)
-            except ValueError:
+            except ValueError:  # pragma: no cover
                 # `signal.signal` may throw if `threading.main_thread` does
                 # not support signals
                 handled_signals.clear()
@@ -479,7 +477,7 @@ class Launart:
         self.status.exiting = True
         if self.task_group is not None:
             self.task_group.stop = True
-            if self.task_group.blocking_task is not None:
+            if self.task_group.blocking_task is not None:  # TODO: TEST THIS
                 self.task_group.blocking_task.cancel()
         if not main_task.done():
             main_task.cancel()
@@ -498,7 +496,8 @@ class Launart:
                 tsk.cancel()
             loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
 
-            for task in to_cancel:
+            for task in to_cancel:  # pragma: no cover
+                # BELIEVE IN PSF
                 if task.cancelled():
                     continue
                 if task.exception() is not None:

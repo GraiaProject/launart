@@ -18,7 +18,11 @@ class EmptyLaunchable(Launchable):
         return set()
 
     async def launch(self, manager: Launart):
+        assert Launart.current() is manager
         assert manager is self.manager
+        from loguru import logger
+
+        logger.success("EmptyLaunchable Triggered")
         self.triggered = True
 
 
