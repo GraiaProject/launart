@@ -440,6 +440,7 @@ class Launart:
         loop: Optional[asyncio.AbstractEventLoop] = None,
         stop_signal: Iterable[signal.Signals] = (signal.SIGINT,),
     ):
+        import contextlib
         import functools
         import threading
 
@@ -469,7 +470,10 @@ class Launart:
         try:
             self._cancel_tasks(loop)
             loop.run_until_complete(loop.shutdown_asyncgens())
-            loop.run_until_complete(loop.shutdown_default_executor())
+            with contextlib.suppress(RuntimeError, AttributeError):
+                # LINK: https://docs.python.org/3.10/library/asyncio-eventloop.html#asyncio.loop.shutdown_default_executor
+                # TODO: MENTION THIS IN CHANGELOG
+                loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             logger.success("asyncio shutdown complete.", style="green bold")
 
