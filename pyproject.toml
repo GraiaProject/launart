@@ -71,3 +71,8 @@ build-backend = "pdm.pep517.api"
 
 [tool.pyright]
 exclude = ["__pypackages__"]
+
+[tool.pytest.ini_options]
+python_files = "tests/*"
+asyncio_mode = "strict"
+norecursedirs = "_saya_mod"
