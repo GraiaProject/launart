@@ -1,10 +1,11 @@
+import asyncio
 from typing import Any
 
 import pytest
 
+from launart._sideload import Override, override
 from launart.component import RequirementResolveFailed, resolve_requirements
-from launart.service import ExportInterface
-from launart.utilles import priority_strategy
+from launart.utilles import priority_strategy, wait_fut
 from tests.fixture import component_standalone, interface
 
 
@@ -63,3 +64,45 @@ def test_priority_strategy():
         priority_strategy([s1, s2], spit)
     with pytest.raises(ValueError):
         priority_strategy([s1, d1], spit)
+
+
+def test_override():
+    class MyOrigin:
+        data: dict
+
+        def __init__(self, d: dict) -> None:
+            self.data = d
+
+    origin = MyOrigin({"a": 3})
+    additional = {"a": 4}
+    o = override(origin, additional)
+    assert o.source is origin
+    assert o.a == 4
+    with pytest.raises(AttributeError):
+        o.b
+
+
+@pytest.mark.asyncio
+async def test_wait_fut():
+    await wait_fut([])
+    await wait_fut([asyncio.sleep(0.01), asyncio.create_task(asyncio.sleep(0.02))])
+
+    t1 = asyncio.create_task(asyncio.sleep(0.01))
+    t2 = asyncio.create_task(asyncio.sleep(0.1))
+
+    await wait_fut([t1, t2], timeout=0.02)
+
+    assert t1.done()
+    assert not t2.done()
+
+    t2.cancel()
+
+    t1 = asyncio.create_task(asyncio.sleep(0.01))
+    t2 = asyncio.create_task(asyncio.sleep(0.1))
+
+    await wait_fut([t1, t2], return_when=asyncio.FIRST_COMPLETED)
+
+    assert t1.done()
+    assert not t2.done()
+
+    t2.cancel()

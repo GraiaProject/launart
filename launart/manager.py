@@ -95,15 +95,15 @@ class ManagerStatus(Statv):
             self._waiters.remove(waiter)
 
     async def wait_for_preparing(self):
-        while self.stage != "preparing":
+        while not self.preparing:
             await self.wait_for_update()
 
     async def wait_for_blocking(self):
-        while self.stage != "blocking":
+        while not self.blocking:
             await self.wait_for_update()
 
     async def wait_for_cleaning(self, *, current: str | None = None):
-        while self.stage != "cleaning":
+        while not self.cleaning:
             await self.wait_for_update(current=current, stage="cleaning")
 
     async def wait_for_finished(self, *, current: str | None = None):
@@ -283,8 +283,8 @@ class Launart:
         local_status._waiters.extend(owned_waiters)
         local_status.update_multi(
             {
-                ManagerStatus.stage: "cleaning",  # type: ignore
-                ManagerStatus.exiting: True,  # type: ignore
+                ManagerStatus.stage: "cleaning",
+                ManagerStatus.exiting: True,
             }
         )
 
@@ -379,7 +379,7 @@ class Launart:
         self.task_group.add_coroutines(*blocking_tasks)
         try:
             if blocking_tasks:
-                await self.task_group.wait()
+                await self.task_group
         except asyncio.CancelledError:
             logger.info("Blocking phase cancelled by user.", style="red bold")
         finally:

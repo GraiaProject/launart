@@ -79,7 +79,6 @@ def test_manager_stat():
 
     class _L(Launchable):
         id = "test_stat"
-        triggered = False
 
         @property
         def stages(self):
@@ -90,22 +89,26 @@ def test_manager_stat():
             return set()
 
         async def launch(self, _):
+            await self.status.wait_for()  # test empty wait
             await asyncio.sleep(0.02)
             async with self.stage("preparing"):
                 await asyncio.sleep(0.02)
             await asyncio.sleep(0.02)
+            assert self.status.prepared
             async with self.stage("blocking"):
+                assert self.status.prepared
+                assert self.status.blocking
                 await asyncio.sleep(0.02)
             await asyncio.sleep(0.02)
             async with self.stage("cleanup"):
+                assert not self.status.prepared
                 await asyncio.sleep(0.02)
             await asyncio.sleep(0.02)
 
     mgr.add_launchable(_L())
     loop = asyncio.new_event_loop()
-    tasks = []
     mk_task = loop.create_task
-    tasks.append(mk_task(mgr.status.wait_for_preparing()))
+    tasks = [mk_task(mgr.status.wait_for_preparing())]
     loop.run_until_complete(asyncio.sleep(0.01))
     mk_task(mgr.launch())
     tasks.append(mk_task(mgr.status.wait_for_blocking()))
