@@ -175,7 +175,11 @@ class Launchable(metaclass=ABCMeta):
         launchables = [self.manager.get_launchable(id) for id in launchable_id]
         while any(launchable.status.stage not in STATS[STATS.index(stage) :] for launchable in launchables):
             await asyncio.wait(
-                [launchable.status.wait_for_update() for launchable in launchables if launchable.status.stage != stage],
+                [
+                    asyncio.create_task(launchable.status.wait_for_update())
+                    for launchable in launchables
+                    if launchable.status.stage != stage
+                ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 

@@ -211,7 +211,7 @@ class Launart:
         if TYPE_CHECKING:
             assert self.task_group is not None
         if "preparing" not in launchable.stages:
-            return
+            return  # FIXME
         if not set(self.launchables.keys()).issuperset(launchable._required_id):
             raise ValueError(
                 f"Sideload {launchable.id} requires {launchable._required_id} but {set(self.launchables.keys()) - launchable._required_id} are missing."
@@ -250,7 +250,7 @@ class Launart:
         )
 
         logger.info(f"Sideload {launchable.id}: start blocking")
-        self.task_group.add_coroutine(
+        self.task_group.add(
             asyncio.wait(
                 [
                     task,
@@ -262,7 +262,7 @@ class Launart:
         local_status.stage = "blocking"
         launchable.manager = self
 
-    async def _sideload_cleanup(self, launchable: Launchable):
+    async def _sideload_cleanup(self, launchable: Launchable):  # FIXME
         if TYPE_CHECKING:
             assert self.task_group is not None
         if "cleanup" not in launchable.stages:
@@ -376,7 +376,7 @@ class Launart:
             for i in self.launchables.values()
             if "blocking" in i.stages
         ]
-        self.task_group.add_coroutines(*blocking_tasks)
+        self.task_group.add(*blocking_tasks)
         try:
             if blocking_tasks:
                 await self.task_group

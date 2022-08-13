@@ -116,31 +116,19 @@ class FlexibleTaskGroup:
 
     def __await__(self):
         loop = asyncio.get_running_loop()
-        self.blocking_task = loop.create_task(self.__await_impl__())
-        return self.blocking_task.__await__()
+        return self.__await_impl__().__await__()
 
     async def __await_impl__(self):
         while True:
+            self.blocking_task = asyncio.create_task(asyncio.wait(self.tasks))
             try:
-                return await asyncio.shield(asyncio.wait(self.tasks))
+                return await self.blocking_task
             except asyncio.CancelledError:
                 if self.stop:
                     raise
 
-    def add_task(self, task: asyncio.Task):
-        if self.blocking_task is not None:
-            self.blocking_task.cancel()
-        self.tasks.append(task)
-
-    def add_coroutine(self, coroutine: Coroutine):
-        task = asyncio.create_task(coroutine)
-        self.add_task(task)
-
-    def add_tasks(self, *tasks: asyncio.Task):
+    def add(self, *fs: asyncio.Task | Coroutine) -> None:
+        tasks = [f if isinstance(f, asyncio.Task) else asyncio.create_task(f) for f in fs]
         if self.blocking_task is not None:
             self.blocking_task.cancel()
         self.tasks.extend(tasks)
-
-    def add_coroutines(self, *coroutines: Coroutine):
-        tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
-        self.add_tasks(*tasks)

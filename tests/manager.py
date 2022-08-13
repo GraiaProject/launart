@@ -121,6 +121,47 @@ def test_manager_stat():
         assert task.done() and not task.cancelled()
 
 
+@pytest.mark.asyncio
+async def test_wait_for(event_loop: asyncio.AbstractEventLoop):
+    loop = event_loop
+    mgr = Launart()
+
+    class _L(Launchable):
+        id = "test_stat"
+
+        @property
+        def stages(self):
+            return {"preparing", "blocking", "cleanup"}
+
+        @property
+        def required(self):
+            return set()
+
+        async def launch(self, _):
+            await self.status.wait_for()  # test empty wait
+            await asyncio.sleep(0.02)
+            async with self.stage("preparing"):
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.02)
+            assert self.status.prepared
+            async with self.stage("blocking"):
+                assert self.status.prepared
+                assert self.status.blocking
+                await asyncio.sleep(0.02)
+            await asyncio.sleep(0.02)
+            async with self.stage("cleanup"):
+                assert not self.status.prepared
+                await asyncio.sleep(0.02)
+
+    l = _L()
+    with pytest.raises(RuntimeError):
+        await l.wait_for("preparing", "test_stat")
+    mgr.add_launchable(l)
+    mk_task = loop.create_task
+    mk_task(mgr.launch())
+    await l.wait_for("finished", "test_stat")
+
+
 def test_signal_change_during_running():
     mgr = Launart()
 
