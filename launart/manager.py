@@ -28,7 +28,7 @@ from launart.utilles import FlexibleTaskGroup, priority_strategy
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
 
 
-def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # TODO
+def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # pragma: no cover
     exc = t.exception()
     if exc:
         logger.opt(exception=exc).error(
@@ -398,7 +398,7 @@ class Launart:
             ):
                 cleaning_tasks = []
                 for i in components:
-                    if "cleanup" in i.stages:
+                    if "cleanup" in i.stages and i.status.stage == "waiting-for-cleanup":
                         i.status.stage = "cleanup"
                         cleaning_tasks.append(
                             asyncio.wait(
@@ -469,7 +469,6 @@ class Launart:
             loop.run_until_complete(loop.shutdown_asyncgens())
             with contextlib.suppress(RuntimeError, AttributeError):
                 # LINK: https://docs.python.org/3.10/library/asyncio-eventloop.html#asyncio.loop.shutdown_default_executor
-                # TODO: MENTION THIS IN CHANGELOG
                 loop.run_until_complete(loop.shutdown_default_executor())
         finally:
             logger.success("asyncio shutdown complete.", style="green bold")
