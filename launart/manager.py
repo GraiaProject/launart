@@ -1,13 +1,13 @@
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import signal
 from contextvars import ContextVar
 from functools import partial
 from typing import (
     TYPE_CHECKING,
     Any,
-    Callable,
     ClassVar,
     Dict,
     Iterable,
@@ -28,7 +28,7 @@ from launart.utilles import FlexibleTaskGroup, priority_strategy
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
 
 
-def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):
+def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # TODO
     exc = t.exception()
     if exc:
         logger.opt(exception=exc).error(
@@ -139,13 +139,14 @@ class Launart:
         launchable.ensure_manager(self)
         if launchable.id in self.launchables:
             raise ValueError(f"Launchable {launchable.id} already exists.")
+        if self.task_group is not None:
+            launchable._required_id  # Evaluate requirements automatically.
+            tracker = asyncio.create_task(self._sideload_tracker(launchable))
+            self.task_group.sideload_trackers[launchable.id] = tracker
+            self.task_group.add(tracker)  # flush the waiter tasks
         self.launchables[launchable.id] = launchable
         if isinstance(launchable, Service):
             self._update_service_bind()
-        if self.task_group is not None:
-            assert self.task_group.blocking_task is not None
-            loop = asyncio.get_running_loop()
-            loop.create_task(self._sideload_prepare(launchable))
 
     def get_launchable(self, id: str) -> Launchable:
         if id not in self.launchables:
@@ -158,31 +159,31 @@ class Launart:
             raise TypeError(f"{id} is not a service.")
         return launchable
 
-    def remove_launchable(self, launchable: str | Launchable, *, unsafe: bool = False):
+    def remove_launchable(
+        self,
+        launchable: str | Launchable,
+    ):
         if isinstance(launchable, str):
             if launchable not in self.launchables:
+                if self.task_group and launchable in self.task_group.sideload_trackers:
+                    return
                 raise ValueError(f"Launchable {id} does not exist.")
             target = self.launchables[launchable]
         else:
             target = launchable
-        if self.task_group is not None:
-            assert self.task_group.blocking_task is not None
-            loop = asyncio.get_running_loop()
-
+        if self.task_group is None:
+            del self.launchables[target.id]
+        else:
+            if target.id not in self.task_group.sideload_trackers:
+                raise RuntimeError("Only sideload tasks can be removed at runtime!")
+            tracker = self.task_group.sideload_trackers[target.id]
+            if tracker.cancelled() or tracker.done():  # completed in silence, let it pass
+                return
             if target.status.stage not in {"prepared", "blocking", "blocking-completed", "waiting-for-cleanup"}:
                 raise RuntimeError(
                     f"{target.id} obtains invalid stats to sideload active release, it's {target.status.stage}"
                 )
-
-            # check requirements status
-            if not unsafe:
-                layers = resolve_requirements(self.launchables.values())
-                if not layers or launchable not in layers[0]:
-                    raise RuntimeError
-
-            loop.create_task(self._sideload_cleanup(target))
-        else:
-            del self.launchables[target.id]
+            tracker.cancel()  # trigger cancel, and the tracker will start clean up the
         if isinstance(target, Service):
             self._update_service_bind()
 
@@ -202,41 +203,56 @@ class Launart:
 
     def _get_task(self, launchable_id: str):
         if self.task_group is None:
-            raise ValueError("Task Group is not initialized.")
+            raise RuntimeError("Task Group is not initialized.")
         for key, task in self.tasks.items():
             if key == launchable_id:
                 return task
 
-    async def _sideload_prepare(self, launchable: Launchable):
+    async def _sideload_tracker(self, launchable: Launchable) -> None:
         if TYPE_CHECKING:
             assert self.task_group is not None
-        if "preparing" not in launchable.stages:
-            return  # FIXME
-        if not set(self.launchables.keys()).issuperset(launchable._required_id):
-            raise ValueError(
-                f"Sideload {launchable.id} requires {launchable._required_id} but {set(self.launchables.keys()) - launchable._required_id} are missing."
-            )
 
         logger.info(f"Sideload {launchable.id}: injecting")
-
-        # shallow status to avoid wrong judgement to application's current status
 
         local_status = ManagerStatus()
         shallow_self = cast(Launart, override(self, {"status": local_status}))
         launchable.manager = shallow_self
 
-        loop = asyncio.get_running_loop()
-        task = loop.create_task(launchable.launch(shallow_self), name=launchable.id)
+        task = asyncio.create_task(launchable.launch(shallow_self), name=launchable.id)
         task.add_done_callback(partial(_launchable_task_done_callback, self))
         self.tasks[launchable.id] = task
 
         local_status.stage = "preparing"
-        if launchable.status.stage != "waiting-for-prepare":
+        if "preparing" in launchable.stages:
+            await self._sideload_prepare(launchable)
+
+        with contextlib.suppress(asyncio.CancelledError):
+            local_status.stage = "blocking"
+            if "blocking" in launchable.stages:
+                await self._sideload_blocking(launchable)
+
+        local_status.update_multi(
+            {
+                ManagerStatus.stage: "cleaning",
+                ManagerStatus.exiting: True,
+            }
+        )
+        if "cleanup" in launchable.stages:
+            await self._sideload_cleanup(launchable)
+
+        if not task.done() or not task.cancelled():  # pragma: worst case
+            await task
+        logger.info(f"Sideload {launchable.id}: completed.")
+        del self.tasks[launchable.id]
+        del self.launchables[launchable.id]
+
+    async def _sideload_prepare(self, launchable: Launchable) -> None:
+        if launchable.status.stage != "waiting-for-prepare":  # pragma: worst case
             logger.info(f"waiting sideload {launchable.id} for prepare")
             await asyncio.wait(
                 [
-                    task,
-                    loop.create_task(launchable.status.wait_for("waiting-for-prepare")),
+                    self.tasks[launchable.id],
+                    asyncio.create_task(launchable.status.wait_for("waiting-for-prepare")),
                 ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
@@ -245,72 +261,48 @@ class Launart:
 
         launchable.status.stage = "preparing"
         await asyncio.wait(
-            [task, loop.create_task(launchable.status.wait_for("prepared"))],
+            [
+                self.tasks[launchable.id],
+                asyncio.create_task(launchable.status.wait_for("prepared")),
+            ],
             return_when=asyncio.FIRST_COMPLETED,
         )
+        logger.info(f"Sideload {launchable.id}: preparation completed")
+
+    async def _sideload_blocking(self, launchable: Launchable) -> None:
 
         logger.info(f"Sideload {launchable.id}: start blocking")
-        self.task_group.add(
-            asyncio.wait(
-                [
-                    task,
-                    loop.create_task(launchable.status.wait_for("blocking-completed", "finished")),
-                ],
-                return_when=asyncio.FIRST_COMPLETED,
-            )
+
+        await asyncio.wait(
+            [
+                self.tasks[launchable.id],
+                asyncio.create_task(launchable.status.wait_for("blocking-completed", "finished")),
+            ],
+            return_when=asyncio.FIRST_COMPLETED,
         )
-        local_status.stage = "blocking"
-        launchable.manager = self
+        logger.info(f"Sideload {launchable.id}: blocking completed")
 
-    async def _sideload_cleanup(self, launchable: Launchable):  # FIXME
-        if TYPE_CHECKING:
-            assert self.task_group is not None
-        if "cleanup" not in launchable.stages:
-            return
+    async def _sideload_cleanup(self, launchable: Launchable):
 
-        loop = asyncio.get_running_loop()
-        task = self.tasks[launchable.id]
-
-        local_status = ManagerStatus()
-        shallow_self = cast(Launart, override(self, {"status": local_status}))
-        launchable.manager = shallow_self
-
-        # take over existed futures
-        owned_waiters = [fut for fut in self.status._waiters if FutureMark in {type(cb) for cb, ctx in fut._callbacks}]
-
-        logger.info(f"Sideload {launchable.id}: cleaning up")
-
-        local_status._waiters.extend(owned_waiters)
-        local_status.update_multi(
-            {
-                ManagerStatus.stage: "cleaning",
-                ManagerStatus.exiting: True,
-            }
-        )
-
-        if launchable.status.stage != "waiting-for-cleanup":
+        if launchable.status.stage != "waiting-for-cleanup":  # pragma: worst case
             await asyncio.wait(
                 [
-                    task,
-                    loop.create_task(launchable.status.wait_for("waiting-for-cleanup")),
+                    self.tasks[launchable.id],
+                    asyncio.create_task(launchable.status.wait_for("waiting-for-cleanup")),
                 ],
                 return_when=asyncio.FIRST_COMPLETED,
             )
 
         launchable.status.stage = "cleanup"
+
         await asyncio.wait(
             [
-                task,
-                loop.create_task(launchable.status.wait_for("finished")),
+                self.tasks[launchable.id],
+                asyncio.create_task(launchable.status.wait_for("finished")),
             ],
             return_when=asyncio.FIRST_COMPLETED,
         )
         logger.info(f"Sideload {launchable.id}: cleanup completed.")
-        if not task.done() or not task.cancelled():
-            await task
-        logger.info(f"Sideload {launchable.id}: completed.")
-        del self.tasks[launchable.id]
-        del self.launchables[launchable.id]
 
     async def launch(self):  # sourcery skip: low-code-quality
         _token = self._context.set(self)
@@ -385,6 +377,11 @@ class Launart:
         finally:
             self.status.exiting = True
             logger.info("Entering cleanup phase.", style="yellow bold")
+            # cleanup the dangling sideload tasks first.
+            if self.task_group.sideload_trackers:
+                for tracker in self.task_group.sideload_trackers.values():
+                    tracker.cancel()
+                await asyncio.wait(self.task_group.sideload_trackers.values())
             self.status.stage = "cleaning"
             for k, v in self.launchables.items():
                 if "cleanup" in v.stages and v.status.stage != "waiting-for-cleanup":
@@ -481,7 +478,7 @@ class Launart:
         self.status.exiting = True
         if self.task_group is not None:
             self.task_group.stop = True
-            if self.task_group.blocking_task is not None:  # TODO: TEST THIS
+            if self.task_group.blocking_task is not None:  # pragma: worst case
                 self.task_group.blocking_task.cancel()
         if not main_task.done():
             main_task.cancel()

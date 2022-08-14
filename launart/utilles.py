@@ -108,14 +108,15 @@ async def wait_fut(
 
 class FlexibleTaskGroup:
     tasks: list[asyncio.Task]
+    sideload_trackers: dict[str, asyncio.Task]
     blocking_task: Optional[asyncio.Task] = None
     stop: bool = False
 
     def __init__(self, *tasks):
+        self.sideload_trackers = {}
         self.tasks = list(tasks)
 
     def __await__(self):
-        loop = asyncio.get_running_loop()
         return self.__await_impl__().__await__()
 
     async def __await_impl__(self):

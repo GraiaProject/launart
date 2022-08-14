@@ -16,11 +16,9 @@ class LaunchableSchema(BaseSchema):
 
 class LaunartBehaviour(Behaviour):
     manager: Launart
-    allow_unsafe: bool = False
 
-    def __init__(self, manager: Launart, *, allow_unsafe: bool = False) -> None:
+    def __init__(self, manager: Launart) -> None:
         self.manager = manager
-        self.allow_unsafe = allow_unsafe
 
     def allocate(self, cube: Cube[LaunchableSchema]):
         if isinstance(cube.metaclass, LaunchableSchema):
@@ -33,7 +31,7 @@ class LaunartBehaviour(Behaviour):
 
     def release(self, cube: Cube[LaunchableSchema]):
         if isinstance(cube.metaclass, LaunchableSchema):
-            self.manager.remove_launchable(cube.content, unsafe=self.allow_unsafe)
+            self.manager.remove_launchable(cube.content)
         else:
             return
         return True

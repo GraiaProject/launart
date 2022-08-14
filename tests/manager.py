@@ -215,7 +215,7 @@ async def test_basic_components():
     stage = []
 
     class TestLaunchable(Launchable):
-        id = "launchable.test.saya"
+        id = "launchable.test"
 
         @property
         def required(self):
@@ -230,12 +230,14 @@ async def test_basic_components():
                 stage.append("lc prepare")
             async with self.stage("blocking"):
                 stage.append("blocking")
+                assert isinstance(mgr._get_task("service.test"), asyncio.Task)
+                assert mgr._get_task("nothing") is None
             async with self.stage("cleanup"):
                 stage.append("lc cleanup")
 
     class TestSrv(Service):
         supported_interface_types = {TestInterface}
-        id = "service.test.saya"
+        id = "service.test"
 
         @property
         def required(self):
@@ -259,5 +261,7 @@ async def test_basic_components():
     mgr = Launart()
     mgr.add_launchable(TestLaunchable())
     mgr.add_launchable(TestSrv())
+    with pytest.raises(RuntimeError):
+        mgr._get_task("service.test")
     await mgr.launch()
     assert stage == ["srv prepare", "lc prepare", "blocking", "blocking", "lc cleanup", "srv cleanup"]

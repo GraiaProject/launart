@@ -1,8 +1,7 @@
 from __future__ import annotations
 
-import asyncio
 from collections import ChainMap
-from typing import TYPE_CHECKING, Any, Dict
+from typing import TYPE_CHECKING, Any, Dict, TypeVar, cast
 
 if TYPE_CHECKING:
     from launart.manager import U_ManagerStage
@@ -27,8 +26,11 @@ class Override:
         return self.__data[item]
 
 
-def override(source: Any, additional: Dict[str, Any]) -> Override:
-    return Override(source, additional)
+T = TypeVar("T")
+
+
+def override(source: T, additional: Dict[str, Any]) -> T:
+    return cast(T, Override(source, additional))
 
 
 class FutureMark:
@@ -39,5 +41,5 @@ class FutureMark:
         self.id = id
         self.stage = stage
 
-    def __call__(self, fut: asyncio.Future) -> Any:
+    def __call__(self, _) -> Any:
         pass
