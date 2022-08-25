@@ -1,6 +1,6 @@
 [project]
 name = "launart"
-version = "0.6.0"
+version = "0.6.1"
 description = "Component lifetime manager for runtime."
 authors = [
     {name = "GreyElaina", email = "GreyElaina@outlook.com"},
