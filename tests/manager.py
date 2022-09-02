@@ -265,3 +265,54 @@ async def test_basic_components():
         mgr._get_task("service.test")
     await mgr.launch()
     assert stage == ["srv prepare", "lc prepare", "blocking", "blocking", "lc cleanup", "srv cleanup"]
+
+
+def test_override_bind():
+    TestInterface = type("SayaTestInterface", (ExportInterface,), {})
+
+    class Srv1(Service):
+        supported_interface_types = {TestInterface: 3}
+        id = "service.test1"
+
+        @property
+        def required(self):
+            return set()
+
+        @property
+        def stages(self):
+            return {"preparing", "blocking", "cleanup"}
+
+        async def launch(self, _):
+            ...
+
+        def get_interface(self, interface_type):
+            return interface_type()
+
+    class Srv2(Service):
+        supported_interface_types = {TestInterface: 1}
+        id = "service.test2"
+
+        @property
+        def required(self):
+            return set()
+
+        @property
+        def stages(self):
+            return {"preparing", "blocking", "cleanup"}
+
+        async def launch(self, _):
+            ...
+
+        def get_interface(self, interface_type):
+            return interface_type()
+
+    mgr = Launart()
+    srv1, srv2 = Srv1(), Srv2()
+    mgr.add_launchable(srv1)
+    assert mgr._service_bind[TestInterface] is srv1
+    mgr.add_launchable(srv2)
+    assert mgr._service_bind[TestInterface] is srv1
+    mgr.override_bind(TestInterface, srv2)
+    assert mgr._service_bind[TestInterface] is srv2
+    with pytest.raises(ValueError):
+        mgr.override_bind(TestInterface, srv1)

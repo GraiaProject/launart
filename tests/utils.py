@@ -1,5 +1,5 @@
 import asyncio
-from typing import Any
+from typing import Any, cast
 
 import pytest
 
@@ -75,7 +75,7 @@ def test_override():
 
     origin = MyOrigin({"a": 3})
     additional = {"a": 4}
-    o = override(origin, additional)
+    o = cast(Override, override(origin, additional))
     assert o.source is origin
     assert o.a == 4
     with pytest.raises(AttributeError):

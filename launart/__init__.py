@@ -10,4 +10,5 @@ from .service import Service as Service
 
 with _suppress(ImportError, ModuleNotFoundError):
     from .saya import LaunartBehaviour as LaunartBehaviour
-    from .saya import ServiceSchema as ServiceSchema
+    from .saya import LaunchableSchema as LaunchableSchema
+del _suppress

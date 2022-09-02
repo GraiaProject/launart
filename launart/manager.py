@@ -14,6 +14,7 @@ from typing import (
     Literal,
     Optional,
     Type,
+    TypeVar,
     cast,
 )
 
@@ -26,6 +27,7 @@ from launart.service import ExportInterface, Service, TInterface
 from launart.utilles import FlexibleTaskGroup, priority_strategy
 
 U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
+E = TypeVar("E", bound=ExportInterface)
 
 
 def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # pragma: no cover
@@ -124,12 +126,14 @@ class Launart:
     _service_bind: Dict[Type[ExportInterface], Service]
 
     _context: ClassVar[ContextVar[Launart]] = ContextVar("launart._context")
+    _priority_overrides: Dict[Type[ExportInterface], Service]
 
     def __init__(self):
         self.launchables = {}
         self._service_bind = {}
         self.tasks = {}
         self.status = ManagerStatus()
+        self._priority_overrides = {}
 
     @classmethod
     def current(cls) -> Launart:
@@ -158,6 +162,12 @@ class Launart:
         if not isinstance(launchable, Service):
             raise TypeError(f"{id} is not a service.")
         return launchable
+
+    def override_bind(self, interface: type[ExportInterface], service: Service) -> None:
+        if interface in self._priority_overrides:
+            raise ValueError(f"{interface} is already overridden by {self._priority_overrides[interface]}")
+        self._priority_overrides[interface] = service
+        self._service_bind.update(self._priority_overrides)
 
     def remove_launchable(
         self,
@@ -192,6 +202,7 @@ class Launart:
             [i for i in self.launchables.values() if isinstance(i, Service)],
             lambda a: a.supported_interface_types,
         )
+        self._service_bind.update(self._priority_overrides)
 
     add_service = add_launchable
     remove_service = remove_launchable
