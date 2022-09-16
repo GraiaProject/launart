@@ -30,7 +30,7 @@ U_Stage = Union[
     None,
 ]
 STAGE_STAT = {
-    None: {"waiting-for-prepare", "waiting-for-cleanup", "blocking"},
+    None: {"waiting-for-prepare", "waiting-for-cleanup", "blocking", "finished"},
     "waiting-for-prepare": {"preparing"},
     "preparing": {"prepared"},
     "prepared": {"blocking", "waiting-for-cleanup", "finished"},
