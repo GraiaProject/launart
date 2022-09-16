@@ -288,7 +288,7 @@ class Launart:
         await asyncio.wait(
             [
                 self.tasks[launchable.id],
-                asyncio.create_task(launchable.status.wait_for("blocking-completed", "finished")),
+                asyncio.create_task(launchable.status.wait_for("blocking-completed")),
             ],
             return_when=asyncio.FIRST_COMPLETED,
         )
@@ -373,7 +373,7 @@ class Launart:
             asyncio.wait(
                 [
                     self.tasks[i.id],
-                    as_task(i.status.wait_for("blocking-completed", "finished")),
+                    as_task(i.status.wait_for("blocking-completed")),
                 ],
                 return_when=asyncio.FIRST_COMPLETED,
             )

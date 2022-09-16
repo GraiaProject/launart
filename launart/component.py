@@ -82,9 +82,8 @@ class LaunchableStatus(Statv):
     def unset(self) -> None:
         self.stage = None
 
-    async def wait_for(self, *stages: U_Stage):
-        if not stages:
-            return
+    async def wait_for(self, stage: U_Stage = None):
+        stages = set(STATS[STATS.index(stage) :])
         while self.stage not in stages:
             await self.wait_for_update()
 
