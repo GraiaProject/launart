@@ -316,3 +316,49 @@ def test_override_bind():
     assert mgr._service_bind[TestInterface] is srv2
     with pytest.raises(ValueError):
         mgr.override_bind(TestInterface, srv1)
+
+
+def test_graceful_abort():
+
+    failure: bool = False
+
+    class Malfunction(Launchable):
+        id = "malfunction"
+
+        @property
+        def required(self):
+            return set()
+
+        @property
+        def stages(self):
+            return {"preparing"}
+
+        async def launch(self, _):
+            async with self.stage("preparing"):
+                raise ValueError
+
+    class Dependent(Launchable):
+        id = "dependent"
+
+        @property
+        def required(self):
+            return {"malfunction"}
+
+        @property
+        def stages(self):
+            return {"preparing", "blocking"}
+
+        async def launch(self, _):
+            async with self.stage("preparing"):
+                ...
+            async with self.stage("blocking"):
+                nonlocal failure
+                failure = True
+
+    mgr = Launart()
+    mgr.add_launchable(Malfunction())
+    mgr.add_launchable(Dependent())
+    mgr.launch_blocking()
+
+    if failure:
+        pytest.fail("Error: dependent reached blocking stage while dependency failed to prepare.")

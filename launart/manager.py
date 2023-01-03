@@ -31,7 +31,14 @@ E = TypeVar("E", bound=ExportInterface)
 
 
 def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # pragma: no cover
-    exc = t.exception()
+    try:
+        exc = t.exception()
+    except asyncio.CancelledError:
+        logger.warning(
+            f"[{t.get_name()}] was cancelled in abort.",
+            alt=f"[yellow bold]component [magenta]{t.get_name()}[/] was cancelled in abort.",
+        )
+        return
     if exc:
         logger.opt(exception=exc).error(
             f"[{t.get_name()}] raised a exception.",
@@ -60,7 +67,7 @@ def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # pragma: 
 
     logger.info(
         f"[{t.get_name()}] completed.",
-        alt=rf"\[[magenta]{t.get_name()}[/magenta]] completed.",
+        alt=rf"[green]\[[magenta]{t.get_name()}[/magenta]] completed.",
     )
     if not component.status.finished:
         component.status.stage = "finished"
@@ -349,9 +356,11 @@ class Launart:
             start=1,
         ):
             preparing_tasks = []
+            tracking_tasks: list[asyncio.Task] = []
             for i in components:
                 if "preparing" in i.stages:
                     i.status.stage = "preparing"
+                    tracking_tasks.append(self.tasks[i.id])
                     preparing_tasks.append(
                         asyncio.wait(
                             [self.tasks[i.id], as_task(i.status.wait_for("prepared"))],
@@ -360,6 +369,18 @@ class Launart:
                     )
             if preparing_tasks:
                 await asyncio.gather(*preparing_tasks)
+
+                if any(tsk.done() and tsk.exception() is not None for tsk in tracking_tasks):
+                    msg = f"Layer #{layer}:[{', '.join(tsk.get_name() for tsk in tracking_tasks if tsk.exception() is not None)}] failed during preparation. Aborting."
+                    logger.critical(
+                        msg,
+                        alt=f"[green]Layer[/] [magenta]#{layer}[/]:"
+                        f"[red bold][{', '.join(f'[cyan italic]{tsk.get_name()}[/cyan italic]' for tsk in tracking_tasks if tsk.exception() is not None)}] failed during preparation. Aborting.[/]",
+                    )
+                    for tsk in self.tasks.values():
+                        tsk.cancel()
+                    self.status.stage = None
+                    return
 
                 logger.success(
                     f"Layer #{layer}:[{', '.join([i.id for i in components])}] preparation completed.",
