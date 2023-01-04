@@ -69,8 +69,6 @@ def _launchable_task_done_callback(mgr: "Launart", t: asyncio.Task):  # pragma: 
         f"[{t.get_name()}] completed.",
         alt=rf"[green]\[[magenta]{t.get_name()}[/magenta]] completed.",
     )
-    if not component.status.finished:
-        component.status.stage = "finished"
 
 
 class ManagerStatus(Statv):
