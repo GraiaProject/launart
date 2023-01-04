@@ -355,6 +355,23 @@ def test_graceful_abort():
                 nonlocal failure
                 failure = True
 
+    class Okay(Launchable):
+        id = "okay"
+
+        @property
+        def required(self):
+            return set()
+
+        @property
+        def stages(self):
+            return {"preparing", "blocking"}
+
+        async def launch(self, _):
+            async with self.stage("preparing"):
+                pass
+            async with self.stage("blocking"):
+                pass
+
     mgr = Launart()
     mgr.add_launchable(Malfunction())
     mgr.add_launchable(Dependent())

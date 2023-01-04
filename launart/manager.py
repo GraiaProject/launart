@@ -369,11 +369,12 @@ class Launart:
                 await asyncio.gather(*preparing_tasks)
 
                 if any(tsk.done() and tsk.exception() is not None for tsk in tracking_tasks):
-                    msg = f"Layer #{layer}:[{', '.join(tsk.get_name() for tsk in tracking_tasks if tsk.exception() is not None)}] failed during preparation. Aborting."
+                    failed = [tsk.get_name() for tsk in tracking_tasks if tsk.done() and tsk.exception() is not None]
+                    msg = f"Layer #{layer}:[{', '.join(failed)}] failed during preparation. Aborting."
                     logger.critical(
                         msg,
                         alt=f"[green]Layer[/] [magenta]#{layer}[/]:"
-                        f"[red bold][{', '.join(f'[cyan italic]{tsk.get_name()}[/cyan italic]' for tsk in tracking_tasks if tsk.exception() is not None)}] failed during preparation. Aborting.[/]",
+                        f"[red bold][{', '.join(f'[cyan italic]{failure}[/cyan italic]' for failure in failed)}] failed during preparation. Aborting.[/]",
                     )
                     for tsk in self.tasks.values():
                         tsk.cancel()
