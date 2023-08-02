@@ -28,10 +28,10 @@ def test_saya():
         saya.require("tests._saya_mod.fail_sub")
 
     channel = saya.require("tests._saya_mod.ok_sub")
-    assert "launchable.test.saya" in mgr.launchables
-    assert "service.test.saya" in mgr.launchables
+    assert "lc.test.saya" in mgr.components
+    assert "service.test.saya" in mgr.components
     saya.uninstall_channel(channel)
-    assert "launchable.test.saya" not in mgr.launchables
-    assert "service.test.saya" not in mgr.launchables
+    assert "lc.test.saya" not in mgr.components
+    assert "service.test.saya" not in mgr.components
 
     saya.uninstall_channel(empty_mod)

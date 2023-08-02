@@ -1,19 +1,26 @@
 {
-  "cSpell.words": [
-    "coros",
-    "dataclass",
-    "Launart",
-    "Launchable",
-    "launchables",
-    "loguru",
-    "sideload",
-    "sigexit",
-    "Statv",
-    "utilles"
-  ],
   "python.testing.pytestArgs": [
     "tests"
   ],
   "python.testing.unittestEnabled": false,
-  "python.testing.pytestEnabled": true
+  "python.testing.pytestEnabled": true,
+  "files.exclude": {
+    "**/.git": true,
+    "**/.svn": true,
+    "**/.hg": true,
+    "**/CVS": true,
+    "**/.DS_Store": true,
+    "**/Thumbs.db": true,
+    ".venv": true
+  },
+  "python.linting.ignorePatterns": [
+      "**/site-packages/**/*.py",
+      ".vscode/*.py",
+      "__pypackages__",
+      "${workspaceFolder}/.venv/**/*.py"
+  ],
+  "python.analysis.exclude": [
+    "**/site-packages/**/*.py"
+  ],
+  "python.analysis.diagnosticMode": "workspace"
 }
