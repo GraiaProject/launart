@@ -255,8 +255,7 @@ async def test_basic_components():
     assert stage == ["srv prepare", "lc prepare", "blocking", "blocking", "lc cleanup", "srv cleanup"]
 
 
-@pytest.mark.asyncio
-async def test_graceful_abort():
+def test_graceful_abort():
 
     failure: bool = False
 
@@ -313,7 +312,7 @@ async def test_graceful_abort():
     mgr = Launart()
     mgr.add_component(Malfunction())
     mgr.add_component(Dependent())
-    await mgr.launch()
+    mgr.launch_blocking()
 
     if failure:
         pytest.fail("Error: dependent reached blocking stage while dependency failed to prepare.")
