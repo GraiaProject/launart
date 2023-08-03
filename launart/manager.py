@@ -474,7 +474,7 @@ class Launart:
         import functools
         import threading
 
-        loop = loop or asyncio.new_event_loop()
+        loop = loop or asyncio.get_event_loop()
 
         logger.info("Starting launart main task...", style="green bold")
 
