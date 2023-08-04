@@ -8,6 +8,7 @@ authors = [
 dependencies = [
     "statv>=0.2.2",
     "loguru>=0.6.0",
+    "creart>=0.3.0",
 ]
 requires-python = ">=3.8"
 readme = "README.md"
@@ -69,8 +70,8 @@ partial_branches = [
 precision = 2
 
 [build-system]
-requires = ["pdm-pep517>=0.12.0"]
-build-backend = "pdm.pep517.api"
+requires = ["pdm-backend"]
+build-backend = "pdm.backend"
 
 [tool.pyright]
 exclude = ["__pypackages__"]
