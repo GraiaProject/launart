@@ -1,6 +1,6 @@
 [project]
 name = "launart"
-version = "0.6.3"
+version = "0.6.4"
 description = "Component lifetime manager for runtime."
 authors = [
     {name = "GreyElaina", email = "GreyElaina@outlook.com"},
@@ -19,19 +19,6 @@ saya = [
     "graia-saya>=0.0.16",
 ]
 
-[tool.pdm]
-[tool.pdm.scripts]
-test = {composite = ["coverage run -m pytest", "coverage xml", "coverage report"]}
-[tool.pdm.dev-dependencies]
-dev = [
-    "richuru>=0.1.0",
-    "black>=22.6.0",
-    "isort>=5.10.1",
-    "graia-saya~=0.0",
-    "coverage~=6.4",
-    "pytest~=7.1",
-    "pytest-asyncio~=0.19",
-]
 [tool.black]
 line-length = 120
 
@@ -68,6 +55,21 @@ partial_branches = [
     "pragma: worst case"
 ]
 precision = 2
+
+[tool.pdm]
+[tool.pdm.scripts]
+test = {composite = ["coverage run -m pytest", "coverage xml", "coverage report"]}
+[tool.pdm.dev-dependencies]
+dev = [
+    "richuru>=0.1.0",
+    "black>=22.6.0",
+    "isort>=5.10.1",
+    "graia-saya~=0.0",
+    "coverage~=6.4",
+    "pytest~=7.1",
+    "pytest-asyncio~=0.19",
+    "graia-broadcast>=0.22.1",
+]
 
 [build-system]
 requires = ["pdm-backend"]
