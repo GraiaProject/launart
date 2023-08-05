@@ -6,7 +6,7 @@ groups = ["default", "dev", "saya"]
 cross_platform = true
 static_urls = false
 lock_version = "4.3"
-content_hash = "sha256:fc97a4e195c3f44a2433c6cfa284c262cc3734a9b9d4a309cd54887e5dcd9984"
+content_hash = "sha256:fb7678631844f1f56a5f86d7dfcfb3889bb416926df5bf2eeb05b9ba01923d43"
 
 [[package]]
 name = "black"
@@ -149,6 +149,19 @@ summary = "Backport of PEP 654 (exception groups)"
 files = [
     {file = "exceptiongroup-1.1.2-py3-none-any.whl", hash = "sha256:e346e69d186172ca7cf029c8c1d16235aa0e04035e5750b4b95039e65204328f"},
     {file = "exceptiongroup-1.1.2.tar.gz", hash = "sha256:12c3e887d6485d16943a309616de20ae5582633e0a2eda17f4e10fd61c1e8af5"},
+]
+
+[[package]]
+name = "graia-broadcast"
+version = "0.22.1"
+requires_python = ">=3.7,<4.0"
+summary = "a highly customizable, elegantly designed event system based on asyncio"
+dependencies = [
+    "typing-extensions>=3.10.0; python_version < \"3.9\"",
+]
+files = [
+    {file = "graia-broadcast-0.22.1.tar.gz", hash = "sha256:5385aa3a5855bc29ffcbe1e6a32d9b051e18ff1cfef77f39c6e449472738e722"},
+    {file = "graia_broadcast-0.22.1-py3-none-any.whl", hash = "sha256:365dc75f84c765904dd2955b4f265d0f94214d29c0adf985adffdd898c17a3eb"},
 ]
 
 [[package]]

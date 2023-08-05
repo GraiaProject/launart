@@ -57,6 +57,7 @@ partial_branches = [
 precision = 2
 
 
+
 [tool.pdm]
 [tool.pdm.scripts]
 test = {composite = ["coverage run -m pytest", "coverage xml", "coverage report"]}
@@ -69,6 +70,7 @@ dev = [
     "coverage~=6.4",
     "pytest~=7.1",
     "pytest-asyncio~=0.19",
+    "graia-broadcast>=0.22.1",
 ]
 [build-system]
 requires = ["pdm-backend"]
