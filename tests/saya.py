@@ -1,3 +1,4 @@
+from __future__ import annotations
 import pytest
 from graia.saya import Saya
 from graia.saya.behaviour.entity import Behaviour

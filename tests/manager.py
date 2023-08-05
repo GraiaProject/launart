@@ -1,7 +1,9 @@
+from __future__ import annotations
 import asyncio
 from signal import SIGINT, default_int_handler, signal
 
 import pytest
+from creart import it
 
 from launart import Launart
 from launart.component import Service
@@ -26,11 +28,11 @@ def test_nothing_blocking():
 
     # set SIGINT and do again
     lc.triggered = False
-    loop = asyncio.new_event_loop()
+    loop = it(asyncio.AbstractEventLoop)
     tsk = loop.create_task(asyncio.sleep(2.0))
     tsk2 = loop.create_task(asyncio.sleep(0))
     signal(SIGINT, lambda *_: None)
-    mgr.launch_blocking(loop=loop)
+    mgr.launch_blocking()
     assert tsk.cancelled()
     assert tsk.done()
     assert tsk2.done()

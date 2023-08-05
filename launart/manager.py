@@ -9,6 +9,7 @@ from contextvars import ContextVar
 from functools import partial
 from typing import TYPE_CHECKING, Any, Coroutine, ClassVar, Dict, Iterable, Optional, TypeVar, cast, overload
 
+from creart import it
 from loguru import logger
 
 from launart._sideload import override
@@ -438,7 +439,18 @@ class Launart:
         import functools
         import threading
 
-        loop = loop or asyncio.get_event_loop()
+        if loop is not None:
+            from warnings import warn
+
+            warn(
+                "The loop argument is deprecated since launart 0.6.4, " "and scheduled for removal in launart 0.7.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        loop = it(asyncio.AbstractEventLoop)
+
+        logger.info("Starting launart main task...", style="green bold")
 
         launch_task = loop.create_task(self.launch(), name="amnesia-launch")
         handled_signals: Dict[signal.Signals, Any] = {}
@@ -464,9 +476,10 @@ class Launart:
             loop.run_until_complete(loop.shutdown_asyncgens())
             with contextlib.suppress(RuntimeError, AttributeError):
                 # LINK: https://docs.python.org/3.10/library/asyncio-eventloop.html#asyncio.loop.shutdown_default_executor
-                loop.run_until_complete(loop.shutdown_default_executor())
+                loop.run_until_complete(loop.shutdown_default_executor())  # type: ignore
         finally:
-            logger.success("Lifespan completed.", style="green bold")
+            asyncio.set_event_loop(None)
+            logger.success("asyncio shutdown complete.", style="green bold")
 
     def _on_sys_signal(self, _, __, main_task: asyncio.Task):
         self.status.exiting = True

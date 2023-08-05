@@ -1,7 +1,7 @@
 {
     "exclude": ["__pypackages__", ".venv"],
     "reportShadowedImports": false,
-    "pythonVersion": "3.9",
+    "pythonVersion": "3.8",
     "venv": ".venv",
     "venvPath": ".",
     "typeCheckingMode": "basic",

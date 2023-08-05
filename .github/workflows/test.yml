@@ -22,7 +22,7 @@ jobs:
           python3 -m pip install pdm
       - name: Install Package
         run: |
-          pdm install
+          pdm install -d
       - name: Test & Report
         run: |
           pdm run test
