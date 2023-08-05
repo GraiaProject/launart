@@ -168,6 +168,12 @@ class Launart:
             alt=rf"[green]Component [magenta]{component.id}[/magenta] completed.",
         )
 
+        # clean interface
+
+        for k, v in list(self._default_isolate['interface_provide']):
+            if v is component:
+                del self._default_isolate['interface_provide'][k]
+
     async def _component_prepare(self, task: asyncio.Task, component: Service):
         if component.status.stage != "waiting-for-prepare":  # pragma: worst case
             logger.info(f"Wait component {component.id} into preparing.")
