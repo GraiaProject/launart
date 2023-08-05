@@ -21,6 +21,7 @@ from launart.utilles import (
     resolve_requirements,
 )
 
+T = TypeVar("T")
 TL = TypeVar("TL", bound=Service)
 
 
@@ -31,15 +32,22 @@ class Launart:
     task_group: Optional[FlexibleTaskGroup] = None
 
     _context: ClassVar[ContextVar[Launart]] = ContextVar("launart._context")
+    _default_isolate: dict[Any, Any]
 
     def __init__(self):
         self.components = {}
         self.tasks = {}
         self.status = ManagerStatus()
+        self._default_isolate = {
+            "interface_provide": {}
+        }
 
     @classmethod
     def current(cls) -> Launart:
         return cls._context.get()
+
+    def export_interface(self, interface: type, service: Service):
+        self._default_isolate['interface_provide'][interface] = service
 
     async def _sideload_tracker(self, component: Service) -> None:
         if TYPE_CHECKING:
@@ -204,6 +212,12 @@ class Launart:
 
         self.components[component.id] = component
 
+        get_interface = getattr(component, 'get_interface', None)
+        supported_interface_types = getattr(component, 'supported_interface_types', None)
+        if get_interface is not None and supported_interface_types is not None:
+            for interface_type in supported_interface_types:
+                self.export_interface(interface_type, component)
+
     @overload
     def get_component(self, target: type[TL]) -> TL:
         ...
@@ -263,6 +277,13 @@ class Launart:
 
         tracker.cancel()  # trigger cancel, and the tracker will start clean up
 
+    def get_interface(self, interface_type: type[T]) -> T:
+        provider_map = self._default_isolate['interface_provide']
+        service = provider_map.get(interface_type)
+        if service is None:
+            raise ValueError(f"{interface_type} is not supported.")
+        return service.get_interface(interface_type)
+
     async def _lifespan_finale(self, token: contextvars.Token):
         finale_tasks = [i for i in self.tasks.values() if not i.done()]
         if finale_tasks:
@@ -313,7 +334,7 @@ class Launart:
 
         try:
             prepared_tasks = []
-            
+
             fatal_flag = False
             for components in resolve_requirements(self.components.values()):
                 preparing_tasks = [
