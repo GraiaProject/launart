@@ -5,24 +5,23 @@ import pytest
 from creart import it
 
 from launart import Launart
-from launart.component import Launchable
-from launart.service import ExportInterface, Service
-from tests.fixture import EmptyLaunchable, component, interface, service
+from launart.component import Service
+from tests.fixture import EmptyService, component, service
 
 
 @pytest.mark.asyncio
 async def test_nothing():
     mgr = Launart()
-    lc = EmptyLaunchable()
-    mgr.add_launchable(lc)
+    lc = EmptyService()
+    mgr.add_component(lc)
     await mgr.launch()
     assert lc.triggered
 
 
 def test_nothing_blocking():
     mgr = Launart()
-    lc = EmptyLaunchable()
-    mgr.add_launchable(lc)
+    lc = EmptyService()
+    mgr.add_component(lc)
     mgr.launch_blocking()
     assert lc.triggered
 
@@ -43,7 +42,7 @@ def test_nothing_blocking():
 def test_nothing_complex():
     mgr = Launart()
 
-    class _L(Launchable):
+    class _L(Service):
         id = "empty"
         triggered = False
 
@@ -60,12 +59,12 @@ def test_nothing_complex():
                 await asyncio.sleep(0.2)
 
     lc = _L()
-    mgr.add_launchable(lc)
+    mgr.add_component(lc)
 
     loop = asyncio.new_event_loop()
     launch_tsk = loop.create_task(mgr.launch())
     loop.run_until_complete(asyncio.sleep(0.02))  # head time
-    assert mgr._get_task("empty")
+    assert "empty" in mgr.tasks
     wrong_launch = loop.create_task(mgr.launch())
     loop.run_until_complete(asyncio.sleep(0.1))
     mgr._on_sys_signal(None, None, launch_tsk)
@@ -78,7 +77,7 @@ def test_nothing_complex():
 def test_manager_stat():
     mgr = Launart()
 
-    class _L(Launchable):
+    class _L(Service):
         id = "test_stat"
 
         @property
@@ -106,7 +105,7 @@ def test_manager_stat():
                 await asyncio.sleep(0.02)
             await asyncio.sleep(0.02)
 
-    mgr.add_launchable(_L())
+    mgr.add_component(_L())
     loop = asyncio.new_event_loop()
     mk_task = loop.create_task
     tasks = [mk_task(mgr.status.wait_for_preparing())]
@@ -127,7 +126,7 @@ async def test_wait_for(event_loop: asyncio.AbstractEventLoop):
     loop = event_loop
     mgr = Launart()
 
-    class _L(Launchable):
+    class _L(Service):
         id = "test_stat"
 
         @property
@@ -157,7 +156,7 @@ async def test_wait_for(event_loop: asyncio.AbstractEventLoop):
     l = _L()
     with pytest.raises(RuntimeError):
         await l.wait_for("preparing", "test_stat")
-    mgr.add_launchable(l)
+    mgr.add_component(l)
     mk_task = loop.create_task
     mk_task(mgr.launch())
     await l.wait_for("finished", "test_stat")
@@ -166,7 +165,7 @@ async def test_wait_for(event_loop: asyncio.AbstractEventLoop):
 def test_signal_change_during_running():
     mgr = Launart()
 
-    class _L(Launchable):
+    class _L(Service):
         id = "empty"
         triggered = False
 
@@ -182,7 +181,7 @@ def test_signal_change_during_running():
             signal(SIGINT, lambda *_: None)
 
     lc = _L()
-    mgr.add_launchable(lc)
+    mgr.add_component(lc)
 
     mgr.launch_blocking()
 
@@ -190,37 +189,27 @@ def test_signal_change_during_running():
 def test_bare_bone():
     mgr = Launart()
     lc = component("component.test", [])
-    mgr.add_launchable(lc)
-    assert mgr.launchables["component.test"] == lc
-    i = interface()
-    srv = service("service.test", {i}, [])
-    mgr.add_launchable(srv)
-    assert mgr.launchables["service.test"] == srv
-    assert mgr.get_launchable("service.test") is srv
-    assert mgr.get_service("service.test") is srv
-    assert isinstance(mgr.get_interface(i), i)
+    mgr.add_component(lc)
+    assert mgr.components["component.test"] == lc
+    srv = service("service.test", [])
+    mgr.add_component(srv)
+    assert mgr.components["service.test"] == srv
+    assert mgr.get_component("service.test") is srv
+    assert mgr.get_component("service.test") is srv
     with pytest.raises(ValueError):
-        mgr.get_interface(interface())
-    with pytest.raises(TypeError):
-        mgr.get_service("component.test")
+        mgr.add_component(lc)
     with pytest.raises(ValueError):
-        mgr.add_launchable(lc)
-    with pytest.raises(ValueError):
-        mgr.get_launchable("$?")
+        mgr.get_component("$?")
 
 
 @pytest.mark.asyncio
 async def test_basic_components():
-    TestInterface = type("SayaTestInterface", (ExportInterface,), {})
-
     stage = []
 
-    class TestLaunchable(Launchable):
-        id = "launchable.test"
+    class TestService(Service):
+        id = "lc.test"
 
-        @property
-        def required(self):
-            return {TestInterface}
+        required: set[str] = {"service.test"}
 
         @property
         def stages(self):
@@ -231,13 +220,11 @@ async def test_basic_components():
                 stage.append("lc prepare")
             async with self.stage("blocking"):
                 stage.append("blocking")
-                assert isinstance(mgr._get_task("service.test"), asyncio.Task)
-                assert mgr._get_task("nothing") is None
+                assert isinstance(mgr.tasks["lc.test"], asyncio.Task)
             async with self.stage("cleanup"):
                 stage.append("lc cleanup")
 
     class TestSrv(Service):
-        supported_interface_types = {TestInterface}
         id = "service.test"
 
         @property
@@ -260,70 +247,20 @@ async def test_basic_components():
             return interface_type()
 
     mgr = Launart()
-    mgr.add_launchable(TestLaunchable())
-    mgr.add_launchable(TestSrv())
-    with pytest.raises(RuntimeError):
-        mgr._get_task("service.test")
+    mgr.add_component(TestService())
+    mgr.add_component(TestSrv())
+    with pytest.raises(KeyError):
+        mgr.tasks["service.test"]
     await mgr.launch()
+    print(stage)
     assert stage == ["srv prepare", "lc prepare", "blocking", "blocking", "lc cleanup", "srv cleanup"]
-
-
-def test_override_bind():
-    TestInterface = type("SayaTestInterface", (ExportInterface,), {})
-
-    class Srv1(Service):
-        supported_interface_types = {TestInterface: 3}
-        id = "service.test1"
-
-        @property
-        def required(self):
-            return set()
-
-        @property
-        def stages(self):
-            return {"preparing", "blocking", "cleanup"}
-
-        async def launch(self, _):
-            ...
-
-        def get_interface(self, interface_type):
-            return interface_type()
-
-    class Srv2(Service):
-        supported_interface_types = {TestInterface: 1}
-        id = "service.test2"
-
-        @property
-        def required(self):
-            return set()
-
-        @property
-        def stages(self):
-            return {"preparing", "blocking", "cleanup"}
-
-        async def launch(self, _):
-            ...
-
-        def get_interface(self, interface_type):
-            return interface_type()
-
-    mgr = Launart()
-    srv1, srv2 = Srv1(), Srv2()
-    mgr.add_launchable(srv1)
-    assert mgr._service_bind[TestInterface] is srv1
-    mgr.add_launchable(srv2)
-    assert mgr._service_bind[TestInterface] is srv1
-    mgr.override_bind(TestInterface, srv2)
-    assert mgr._service_bind[TestInterface] is srv2
-    with pytest.raises(ValueError):
-        mgr.override_bind(TestInterface, srv1)
 
 
 def test_graceful_abort():
 
     failure: bool = False
 
-    class Malfunction(Launchable):
+    class Malfunction(Service):
         id = "malfunction"
 
         @property
@@ -338,7 +275,7 @@ def test_graceful_abort():
             async with self.stage("preparing"):
                 raise ValueError
 
-    class Dependent(Launchable):
+    class Dependent(Service):
         id = "dependent"
 
         @property
@@ -356,7 +293,7 @@ def test_graceful_abort():
                 nonlocal failure
                 failure = True
 
-    class Okay(Launchable):
+    class Okay(Service):
         id = "okay"
 
         @property
@@ -374,8 +311,8 @@ def test_graceful_abort():
                 pass
 
     mgr = Launart()
-    mgr.add_launchable(Malfunction())
-    mgr.add_launchable(Dependent())
+    mgr.add_component(Malfunction())
+    mgr.add_component(Dependent())
     mgr.launch_blocking()
 
     if failure:

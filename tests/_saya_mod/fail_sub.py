@@ -1,7 +1,7 @@
 from graia.saya.channel import Channel
 
-from launart.saya import LaunchableSchema
+from launart.saya import ServiceSchema
 
 c = Channel.current()
 
-c.use(LaunchableSchema())(3)
+c.use(ServiceSchema())(3)

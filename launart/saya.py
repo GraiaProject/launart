@@ -5,12 +5,11 @@ from dataclasses import dataclass
 from graia.saya.behaviour import Behaviour
 from graia.saya.cube import Cube
 from graia.saya.schema import BaseSchema
-
-from launart import Launart, Launchable
+from launart import Launart, Service
 
 
 @dataclass
-class LaunchableSchema(BaseSchema):
+class ServiceSchema(BaseSchema):
     pass
 
 
@@ -20,18 +19,18 @@ class LaunartBehaviour(Behaviour):
     def __init__(self, manager: Launart) -> None:
         self.manager = manager
 
-    def allocate(self, cube: Cube[LaunchableSchema]):
-        if isinstance(cube.metaclass, LaunchableSchema):
-            if not isinstance(cube.content, Launchable):
-                raise TypeError(f"{cube.content} is not a Launchable")
-            self.manager.add_launchable(cube.content)
+    def allocate(self, cube: Cube[ServiceSchema]):
+        if isinstance(cube.metaclass, ServiceSchema):
+            if not isinstance(cube.content, Service):
+                raise TypeError(f"{cube.content} is not a Service")
+            self.manager.add_component(cube.content)
         else:
             return
         return True
 
-    def release(self, cube: Cube[LaunchableSchema]):
-        if isinstance(cube.metaclass, LaunchableSchema):
-            self.manager.remove_launchable(cube.content)
+    def release(self, cube: Cube[ServiceSchema]):
+        if isinstance(cube.metaclass, ServiceSchema):
+            self.manager.remove_component(cube.content)
         else:
             return
         return True

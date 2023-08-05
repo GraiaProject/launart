@@ -3,19 +3,14 @@
 
 import asyncio
 
-from launart import Launart, Launchable
-from launart.service import ExportInterface, Service
+from launart import Launart, Service
+from launart.component import ExportInterface, Service
 
 art = Launart()
 
 
-class TestInterface(ExportInterface):
-    ...
-
-
 class TestSrv(Service):
     id = "test_srv"
-    supported_interface_types = {TestInterface}
 
     @property
     def required(self) -> set[str]:
@@ -34,7 +29,7 @@ class TestSrv(Service):
         return self.interface
 
 
-class TestLaunchable(Launchable):
+class TestService(Service):
     id = "test"
 
     @property
@@ -58,7 +53,7 @@ class TestLaunchable(Launchable):
             await asyncio.sleep(3)
 
 
-class Test2(Launchable):
+class Test2(Service):
     id = "test2"
 
     @property
@@ -76,20 +71,20 @@ class Test2(Launchable):
         async with self.stage("blocking"):
             print("blocking")
             print("test for sideload")
-            manager.add_launchable(TestSideload())
+            manager.add_component(TestSideload())
             await asyncio.sleep(3)
             print("unblocking 2")
             # await asyncio.sleep(1)
-            await manager.launchables["test_sideload"].status.wait_for("blocking")
+            await manager.services["test_sideload"].status.wait_for("blocking")
             print("sideload in blocking, test for active cleanup")
-            manager.remove_launchable("test_sideload")
+            manager.remove_component("test_sideload")
             await asyncio.sleep(10)
 
         async with self.stage("cleanup"):
             print("cleanup2")
 
 
-class TestSideload(Launchable):
+class TestSideload(Service):
     id = "test_sideload"
 
     @property
@@ -114,8 +109,8 @@ class TestSideload(Launchable):
             await asyncio.sleep(3)
 
 
-art.add_service(TestSrv())
-art.add_launchable(TestLaunchable())
-art.add_launchable(Test2())
+art.add_component(TestSrv())
+art.add_component(TestService())
+art.add_component(Test2())
 
 art.launch_blocking()

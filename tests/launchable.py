@@ -3,39 +3,20 @@ import asyncio
 import pytest
 
 from launart import Launart
-from launart.component import Launchable, LaunchableStatus
-from tests.fixture import EmptyLaunchable, component, interface, service
-
+from launart.component import Service, ServiceStatus
+from tests.fixture import EmptyService
 
 def test_ensure():
-    lc = EmptyLaunchable()
+    lc = EmptyService()
     mgr = Launart()
-    mgr.add_launchable(lc)
+    mgr.add_component(lc)
     assert lc.manager is mgr
     with pytest.raises(RuntimeError):
         lc.ensure_manager(Launart())
 
 
-def test_resolve_req():
-    i = interface()
-    s = service("srv", {i}, [])
-    a = component("a", ["b", i])
-    b = component("b", [])
-    mgr = Launart()
-    with pytest.raises(RuntimeError):
-        a._required_id
-    mgr.add_launchable(a)
-    with pytest.raises(RuntimeError):
-        a._required_id
-    mgr.add_launchable(s)
-    with pytest.raises(RuntimeError):
-        a._required_id
-    mgr.add_launchable(b)
-    assert a._required_id == {"srv", "b"}
-
-
-def test_launchable_stat_transition_raw():
-    stat = LaunchableStatus()
+def test_service_stat_transition_raw():
+    stat = ServiceStatus()
     stat.stage = "blocking"
     assert stat.stage == "blocking"
     with pytest.raises(ValueError):
@@ -45,8 +26,8 @@ def test_launchable_stat_transition_raw():
     stat.unset()
 
 
-def test_launchable_stat_transition_base_err_report():
-    class _Base(Launchable):
+def test_service_stat_transition_base_err_report():
+    class _Base(Service):
         @property
         def required(self):
             return set()
@@ -104,8 +85,9 @@ def test_launchable_stat_transition_base_err_report():
         asyncio.run(e.launch(None))
 
 
-def test_launchable_stat_transition_err():
-    class _Base(Launchable):
+@pytest.mark.asyncio
+async def test_service_stat_transition_err():
+    class _Base(Service):
         @property
         def required(self):
             return set()
@@ -159,5 +141,5 @@ def test_launchable_stat_transition_err():
     mgr = Launart()
 
     for e in [ErrToPrepare(), ErrToBlocking(), ErrToCleanup()]:
-        mgr.add_launchable(e)
-    mgr.launch_blocking()
+        mgr.add_component(e)
+    await mgr.launch()

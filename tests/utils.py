@@ -4,9 +4,8 @@ from typing import Any, cast
 import pytest
 
 from launart._sideload import Override, override
-from launart.component import RequirementResolveFailed, resolve_requirements
-from launart.utilles import priority_strategy, wait_fut
-from tests.fixture import component_standalone, interface
+from launart.utilles import wait_fut, resolve_requirements, RequirementResolveFailed
+from tests.fixture import component_standalone
 
 
 def test_resolve_success():
@@ -32,38 +31,6 @@ def test_resolve_fail():
     with pytest.raises(RequirementResolveFailed):
         resolve_requirements(dataset)
 
-
-def test_priority_strategy():
-    def spit(v: Any) -> Any:
-        return v
-
-    with pytest.raises(TypeError):
-        priority_strategy([1, 2, 3], spit)
-    with pytest.raises(TypeError):
-        priority_strategy([(1, 2), 3], spit)
-
-    i = [interface() for _ in range(10)]
-
-    s1 = {i[0], i[1]}
-    s2 = {i[1], i[2]}
-    s3 = {i[2], i[3]}
-
-    d1 = {i[0]: 1, i[1]: 2}
-    d2 = {i[1]: 1, i[2]: 2}
-    d3 = {i[2]: 1, i[3]: 2}
-
-    assert priority_strategy([s1, s3], spit) == {i[0]: s1, i[1]: s1, i[2]: s3, i[3]: s3}
-
-    assert priority_strategy([d1, d2, d3], spit) == {i[0]: d1, i[1]: d1, i[2]: d2, i[3]: d3}
-
-    assert priority_strategy([d1, d3, d2], spit) == {i[0]: d1, i[1]: d1, i[2]: d2, i[3]: d3}
-
-    assert priority_strategy([(d1, d2), d3], spit) == {i[0]: (d1, d2), i[1]: (d1, d2), i[2]: (d1, d2), i[3]: d3}
-
-    with pytest.raises(ValueError):
-        priority_strategy([s1, s2], spit)
-    with pytest.raises(ValueError):
-        priority_strategy([s1, d1], spit)
 
 
 def test_override():

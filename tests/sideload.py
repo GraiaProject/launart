@@ -3,11 +3,12 @@ import asyncio
 import pytest
 
 from launart import Launart
-from launart.component import Launchable
+from launart.component import Service
+from launart.utilles import RequirementResolveFailed
 from tests.fixture import component
 
 
-class _Base(Launchable):
+class _Base(Service):
     @property
     def required(self):
         return set()
@@ -54,24 +55,24 @@ async def test_sideload_base():
             async with self.stage("preparing"):
                 ...
             async with self.stage("blocking"):
-                manager.add_launchable(Sideload1())
-                manager.add_launchable(component("worker_none", []))
+                manager.add_component(Sideload1())
+                manager.add_component(component("worker_none", []))
+                with pytest.raises(RequirementResolveFailed):
+                    manager.add_component(component("worker_weird_req", ["$"]))
                 with pytest.raises(RuntimeError):
-                    manager.add_launchable(component("worker_weird_req", ["$"]))
+                    manager.remove_component("worker1")  # wrong status
                 with pytest.raises(RuntimeError):
-                    manager.remove_launchable("worker1")  # wrong status
-                with pytest.raises(RuntimeError):
-                    manager.remove_launchable("test_sideload_add")  # removing prohibited
+                    manager.remove_component("test_sideload_add")  # removing prohibited
                 await s1.wait()
-                manager.add_launchable(Sideload2())
+                manager.add_component(Sideload2())
                 await s2.wait()
-                manager.remove_launchable("worker1")
+                manager.remove_component("worker1")
                 s_cleanup.set()
             async with self.stage("cleanup"):
                 with pytest.raises(ValueError):
-                    manager.remove_launchable("worker-any")
-                manager.remove_launchable("worker2")
+                    manager.remove_component("worker-any")
+                manager.remove_component("worker2")
 
     mgr = Launart()
-    mgr.add_launchable(AddSideload())
+    mgr.add_component(AddSideload())
     await mgr.launch()

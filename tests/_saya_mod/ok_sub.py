@@ -1,17 +1,14 @@
 from graia.saya.channel import Channel
 
-from launart.component import Launchable
-from launart.saya import LaunchableSchema
-from launart.service import ExportInterface, Service
+from launart.component import Service
+from launart.saya import ServiceSchema
 
 c = Channel.current()
 
 
-SayaTestInterface = type("SayaTestInterface", (ExportInterface,), {})
 
-
-class SayaTestLaunchable(Launchable):
-    id = "launchable.test.saya"
+class SayaTestService(Service):
+    id = "lc.test.saya"
 
     @property
     def required(self):
@@ -26,7 +23,6 @@ class SayaTestLaunchable(Launchable):
 
 
 class SayaTestSrv(Service):
-    supported_interface_types = {SayaTestInterface}
     id = "service.test.saya"
 
     @property
@@ -40,9 +36,6 @@ class SayaTestSrv(Service):
     async def launch(self, _):
         ...
 
-    def get_interface(self, interface_type):
-        return interface_type()
 
-
-c.use(LaunchableSchema())(SayaTestLaunchable())
-c.use(LaunchableSchema())(SayaTestSrv())
+c.use(ServiceSchema())(SayaTestService())
+c.use(ServiceSchema())(SayaTestSrv())
