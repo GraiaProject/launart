@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 from launart import Launart
-from launart.component import Service
+from launart.service import Service
 from launart.utilles import RequirementResolveFailed
 from tests.fixture import component
 

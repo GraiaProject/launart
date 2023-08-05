@@ -4,7 +4,7 @@
 import asyncio
 
 from launart import Launart, Service
-from launart.component import ExportInterface, Service
+from launart.service import ExportInterface, Service
 
 art = Launart()
 

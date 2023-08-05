@@ -13,7 +13,7 @@ from creart import it
 from loguru import logger
 
 from launart._sideload import override
-from launart.component import Service
+from launart.service import Service
 from launart.status import ManagerStatus
 from launart.utilles import (
     FlexibleTaskGroup,

@@ -6,7 +6,7 @@ import pytest
 from creart import it
 
 from launart import Launart
-from launart.component import Service
+from launart.service import Service
 from tests.fixture import EmptyService, component, service
 
 

@@ -4,7 +4,7 @@ import asyncio
 import pytest
 
 from launart import Launart
-from launart.component import Service, ServiceStatus
+from launart.service import Service, ServiceStatus
 from tests.fixture import EmptyService
 
 def test_ensure():

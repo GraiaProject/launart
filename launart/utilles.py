@@ -21,7 +21,7 @@ from typing import (
 from loguru import logger
 
 if TYPE_CHECKING:
-    from launart.component import Service
+    from launart.service import Service
 
 T = TypeVar("T")
 H = TypeVar("H", bound=Hashable)

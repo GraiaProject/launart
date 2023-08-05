@@ -1,6 +1,6 @@
 from graia.saya.channel import Channel
 
-from launart.component import Service
+from launart.service import Service
 from launart.saya import ServiceSchema
 
 c = Channel.current()
