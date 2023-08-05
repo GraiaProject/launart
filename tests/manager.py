@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import asyncio
 from signal import SIGINT, default_int_handler, signal
 
