@@ -1,12 +1,10 @@
-# import richuru
-# richuru.install()
-
+from __future__ import annotations
 import asyncio
 
 from launart import Launart, Service
-from launart.service import ExportInterface, Service
 
 art = Launart()
+
 
 
 class TestSrv(Service):
@@ -22,11 +20,7 @@ class TestSrv(Service):
 
     async def launch(self, manager: Launart):
         async with self.stage("preparing"):
-            self.interface = TestInterface()
             print("TestSrv: prepared TestInterface")
-
-    def get_interface(self):
-        return self.interface
 
 
 class TestService(Service):
@@ -34,7 +28,7 @@ class TestService(Service):
 
     @property
     def required(self):
-        return {TestInterface}
+        return {"test_srv"}
 
     @property
     def stages(self) -> set[str]:
@@ -75,7 +69,7 @@ class Test2(Service):
             await asyncio.sleep(3)
             print("unblocking 2")
             # await asyncio.sleep(1)
-            await manager.services["test_sideload"].status.wait_for("blocking")
+            await manager.components["test_sideload"].status.wait_for("blocking")
             print("sideload in blocking, test for active cleanup")
             manager.remove_component("test_sideload")
             await asyncio.sleep(10)
