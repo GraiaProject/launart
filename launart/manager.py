@@ -439,7 +439,7 @@ class Launart:
         import functools
         import threading
 
-        if loop is not None:
+        if loop is not None:  # pragma: no cover
             from warnings import warn
 
             warn(
