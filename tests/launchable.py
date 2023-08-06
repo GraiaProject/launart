@@ -75,7 +75,7 @@ def test_service_stat_transition_base_err_report():
             return {"finished"}
 
         async def launch(self, _):
-            async with self.stage("finished"):  # oops
+            async with self.stage("finished"):  # type: ignore
                 ...
 
     with pytest.raises(ValueError):
