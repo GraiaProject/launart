@@ -11,7 +11,7 @@ if TYPE_CHECKING:
 class LaunartCreator(AbstractCreator):
     targets = (
         CreateTargetInfo(
-            module="launart.amnager",
+            module="launart.manager",
             identify="Launart",
             humanized_name="Launart",
             description="<common,graia> universal application lifespan manager",
