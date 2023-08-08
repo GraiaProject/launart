@@ -171,7 +171,7 @@ class Launart:
 
         # clean interface
 
-        for k, v in list(self._default_isolate['interface_provide']):
+        for k, v in list(self._default_isolate['interface_provide'].items()):
             if v is component:
                 del self._default_isolate['interface_provide'][k]
 
