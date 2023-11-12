@@ -9,7 +9,6 @@ from functools import partial
 from itertools import chain
 from typing import TYPE_CHECKING, Any, ClassVar, Coroutine, Dict, Iterable, Optional, TypeVar, cast, overload
 
-from creart import it
 from loguru import logger
 
 from launart._sideload import override
@@ -435,6 +434,7 @@ class Launart:
         loop: Optional[asyncio.AbstractEventLoop] = None,
         stop_signal: Iterable[signal.Signals] = (signal.SIGINT,),
     ):
+        from creart import it
         import contextlib
         import functools
         import threading
