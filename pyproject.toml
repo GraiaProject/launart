@@ -6,7 +6,6 @@ authors = [
     {name = "GreyElaina", email = "GreyElaina@outlook.com"},
 ]
 dependencies = [
-    "statv>=0.2.2",
     "loguru>=0.6.0",
     "creart>=0.3.0",
     "typing-extensions>=4.5.0",

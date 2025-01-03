@@ -7,6 +7,10 @@ class ManagerStatus:
     def __init__(self, context: ServiceContext):
         self._context = context
 
+    @property
+    def exiting(self):
+        return self._context.should_exit
+
     def __repr__(self) -> str:
         return f"<ManagerStatus stage={self._context._status}>"
 
