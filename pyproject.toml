@@ -9,8 +9,10 @@ dependencies = [
     "statv>=0.2.2",
     "loguru>=0.6.0",
     "creart>=0.3.0",
+    "typing-extensions>=4.5.0",
+    "exceptiongroup>=1.2.2",
 ]
-requires-python = ">=3.8"
+requires-python = ">=3.9"
 readme = "README.md"
 license = {text = "MIT"}
 
