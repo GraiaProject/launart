@@ -24,6 +24,7 @@ class Launart:
 
     def __init__(self):
         self._core = Bootstrap()
+        self._offlines = {}
         self._default_isolate = {"interface_provide": {}}
 
     @classmethod
@@ -36,7 +37,12 @@ class Launart:
     def add_component(self, component: Service):
         if not self._core.running:
             return self._core.add_initial_services(make_service(component))
-        # TODO: add service during running.
+
+        async def _():
+            online = await self._core.start_lifespan([make_service(component)])
+            self._offlines[component.id] = online()
+
+        asyncio.create_task(_())
 
     @overload
     def get_component(self, target: type[TL]) -> TL:
@@ -62,16 +68,19 @@ class Launart:
         self,
         component: str | Service,
     ):
+        if isinstance(component, str):
+            serv_id = component
+        else:
+            serv_id = component.id
         if not self._core.running:
-            if isinstance(component, str):
-                serv_id = component
-            else:
-                serv_id = component.id
             if serv_id not in self._core.initial_services:
                 raise ValueError(f"Service {serv_id} does not exists.")
             self._core.initial_services.pop(serv_id)
             return
-        # TODO: remove service during running.
+        if serv_id not in self._offlines:
+            raise ValueError(f"Service {serv_id} cannot be removed.")
+        offline = self._offlines.pop(serv_id)
+        asyncio.create_task(offline())
 
     def get_interface(self, interface_type: type[T]) -> T:
         provider_map = self._default_isolate["interface_provide"]

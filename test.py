@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 
 from launart import Launart, Service
+from _bootstrap import Stage, Phase
 
 art = Launart()
 
@@ -66,15 +67,16 @@ class Test2(Service):
 
         async with self.stage("blocking"):
             print("blocking 2")
-            # print("test for sideload")
-            # manager.add_component(TestSideload())
+            print("test for sideload")
+            manager.add_component(TestSideload())
             await asyncio.sleep(3)
             print("unblocking 2")
-            # await asyncio.sleep(1)
+            await asyncio.sleep(1)
+            await manager._core.contexts["test_sideload"].wait_for(Stage.ONLINE, Phase.PENDING)
             # await manager.components["test_sideload"].status.wait_for("blocking")
-            # print("sideload in blocking, test for active cleanup")
-            # manager.remove_component("test_sideload")
-            # await asyncio.sleep(10)
+            print("sideload in blocking, test for active cleanup")
+            manager.remove_component("test_sideload")
+            await asyncio.sleep(5)
 
         async with self.stage("cleanup"):
             print("cleanup2")
