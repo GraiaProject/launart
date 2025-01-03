@@ -10,52 +10,6 @@ if TYPE_CHECKING:
     from launart.service import Service
 
 
-def _dummy_blocking(lineno: int, indent: int) -> ast.AsyncWith:
-    return ast.AsyncWith(
-        items=[
-            ast.withitem(
-                context_expr=ast.Call(
-                    func=ast.Attribute(
-                        value=ast.Name(
-                            id="self",
-                            ctx=ast.Load(),
-                            lineno=lineno,
-                            col_offset=19 + indent,
-                            end_lineno=lineno,
-                            end_col_offset=23 + indent,
-                        ),
-                        attr="stage",
-                        ctx=ast.Load(),
-                        lineno=lineno,
-                        col_offset=19 + indent,
-                        end_lineno=lineno,
-                        end_col_offset=29 + indent,
-                    ),
-                    args=[
-                        ast.Constant(
-                            value="blocking",
-                            lineno=lineno,
-                            col_offset=30 + indent,
-                            end_lineno=lineno,
-                            end_col_offset=40 + indent,
-                        )
-                    ],
-                    keywords=[],
-                    lineno=lineno,
-                    col_offset=19 + indent,
-                    end_lineno=lineno,
-                    end_col_offset=41 + indent,
-                ),
-            )
-        ],
-        body=[ast.Pass(lineno=lineno + 1, col_offset=12 + indent, end_lineno=lineno + 1, end_col_offset=16 + indent)],
-        lineno=lineno,
-        col_offset=8 + indent,
-        end_lineno=lineno + 1,
-        end_col_offset=16 + indent,
-    )
-
-
 def patch_launch(serv: Service) -> Callable[[Launart], Awaitable[None]]:
     if serv.stages == {"preparing", "blocking", "cleanup"}:
         return serv.launch
@@ -137,7 +91,11 @@ def patch_launch(serv: Service) -> Callable[[Launart], Awaitable[None]]:
                     break
         else:
             raise ValueError("this component has no stage method.")
-        new = _dummy_blocking(_node.lineno + 1, node.col_offset - 4)
+
+        new = ast.parse("async with self.stage('blocking'):\n    pass").body[0]
+        new.lineno = _node.lineno + 1
+        new.col_offset = node.col_offset + 4
+
         for other in node.body[index:]:
             for n in ast.walk(other):
                 if hasattr(n, "lineno"):
