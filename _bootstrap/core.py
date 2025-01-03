@@ -2,18 +2,16 @@ from __future__ import annotations
 
 import asyncio
 import signal
-from typing import TYPE_CHECKING, Any, Iterable
 from contextvars import ContextVar
+from typing import TYPE_CHECKING, Any, Iterable
 
 from exceptiongroup import BaseExceptionGroup  # noqa: A004
 from loguru import logger
 
-from .utiles import TaskGroup, any_completed, cvar, unity
-
 from ._resolve import resolve_dependencies, validate_services_removal
 from .context import ServiceContext
 from .status import Phase, Stage
-from .utiles import cancel_alive_tasks
+from .utiles import TaskGroup, any_completed, cancel_alive_tasks, cvar, unity
 
 if TYPE_CHECKING:
     from .service import Service
@@ -95,7 +93,8 @@ class Bootstrap:
                         self.contexts[i.get_name()].dispatch_online()
 
                 await self._handle_stage_cleanup(
-                    [self.services[i.get_name()] for i in done] + [self.services[i.get_name()] for i in curr if not i.done()]
+                    [self.services[i.get_name()] for i in done]
+                    + [self.services[i.get_name()] for i in curr if not i.done()]
                 )
 
             return _dummy_online
@@ -178,7 +177,9 @@ class Bootstrap:
                 self._sigexit_trig([service_bind[i] for i in layer])
 
             awaiting_daemon_exit = asyncio.create_task(any_completed(daemon_tasks))
-            awaiting_dispatch_ready = unity([i.wait_for(Stage.CLEANUP, Phase.WAITING) for i in _contexts.values()])  # awaiting_prepare
+            awaiting_dispatch_ready = unity(
+                [i.wait_for(Stage.CLEANUP, Phase.WAITING) for i in _contexts.values()]
+            )  # awaiting_prepare
             completed_task, _ = await any_completed([awaiting_daemon_exit, awaiting_dispatch_ready])
 
             if completed_task is awaiting_daemon_exit:
@@ -210,7 +211,9 @@ class Bootstrap:
         with cvar(BOOTSTRAP_CONTEXT, self):
             failed = []
 
-            online_dispatch = await self.start_lifespan(self.initial_services.values(), failed_record=failed, rollback=True)
+            online_dispatch = await self.start_lifespan(
+                self.initial_services.values(), failed_record=failed, rollback=True
+            )
             offline_callback = online_dispatch()
 
             try:

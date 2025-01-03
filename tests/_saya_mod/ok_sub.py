@@ -1,10 +1,9 @@
 from graia.saya.channel import Channel
 
-from launart.service import Service
 from launart.saya import ServiceSchema
+from launart.service import Service
 
 c = Channel.current()
-
 
 
 class SayaTestService(Service):

@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 
 import pytest
@@ -6,6 +7,7 @@ import pytest
 from launart import Launart
 from launart.service import Service, ServiceStatus
 from tests.fixture import EmptyService
+
 
 def test_ensure():
     lc = EmptyService()

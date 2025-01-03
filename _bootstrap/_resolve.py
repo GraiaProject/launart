@@ -41,7 +41,9 @@ def resolve_dependencies(
     result: list[list[str]] = []
 
     while unresolved:
-        layer_candidates = [service for service in unresolved.values() if resolved_id.issuperset(dependencies_map[service.id])]
+        layer_candidates = [
+            service for service in unresolved.values() if resolved_id.issuperset(dependencies_map[service.id])
+        ]
 
         if not layer_candidates:
             raise TypeError("Failed to resolve requirements due to cyclic dependencies or unmet constraints.")

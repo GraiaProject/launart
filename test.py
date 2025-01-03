@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 
 from launart import Launart, Service
@@ -15,11 +16,13 @@ class TestSrv(Service):
 
     @property
     def stages(self) -> set[str]:
-        return {"preparing"}
+        return {"preparing", "cleanup"}
 
     async def launch(self, manager: Launart):
         async with self.stage("preparing"):
             print("TestSrv: prepared TestInterface")
+        async with self.stage("cleanup"):
+            print("TestSrv: cleanup TestInterface")
 
 
 class TestService(Service):

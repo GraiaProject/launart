@@ -4,9 +4,8 @@ import asyncio
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Coroutine, Iterable, TypeVar
 
-from typing_extensions import TypeAlias
 from loguru import logger
-
+from typing_extensions import TypeAlias
 
 if TYPE_CHECKING:
     from contextvars import ContextVar

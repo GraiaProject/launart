@@ -1,11 +1,12 @@
 from __future__ import annotations
+
 import asyncio
 from typing import Any, cast
 
 import pytest
 
 from launart._sideload import Override, override
-from launart.utilles import wait_fut, resolve_requirements, RequirementResolveFailed
+from launart.utilles import RequirementResolveFailed, resolve_requirements, wait_fut
 from tests.fixture import component_standalone
 
 
@@ -31,7 +32,6 @@ def test_resolve_fail():
     ]
     with pytest.raises(RequirementResolveFailed):
         resolve_requirements(dataset)
-
 
 
 def test_override():

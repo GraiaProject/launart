@@ -1,9 +1,8 @@
 from _bootstrap.context import ServiceContext
-from _bootstrap.status import Stage, Phase
+from _bootstrap.status import Phase, Stage
 
 
 class ManagerStatus:
-
     def __init__(self, context: ServiceContext):
         self._context = context
 

@@ -79,5 +79,4 @@ def service(component_id: str, required_ids: list[str]) -> Service:
         async def launch(self, _):
             ...
 
-
     return Srv()

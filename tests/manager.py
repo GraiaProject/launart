@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import asyncio
 from signal import SIGINT, default_int_handler, signal
 
@@ -258,7 +259,6 @@ async def test_basic_components():
 
 
 def test_graceful_abort():
-
     failure: bool = False
 
     class Malfunction(Service):
