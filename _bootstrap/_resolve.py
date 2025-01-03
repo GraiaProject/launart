@@ -52,9 +52,9 @@ def resolve_dependencies(
 
         for service in layer_candidates:
             if service.before:
-                befores.append(service)
+                befores.append(service.id)
             else:
-                no_befores.append(service)
+                no_befores.append(service.id)
 
         # 优先无 before 的服务，一旦无 before 的服务存在，就先放这一层
         current_layer = no_befores or befores

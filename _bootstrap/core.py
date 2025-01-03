@@ -13,6 +13,7 @@ from .utiles import TaskGroup, any_completed, cvar, unity
 from ._resolve import resolve_dependencies, validate_services_removal
 from .context import ServiceContext
 from .status import Phase, Stage
+from .utiles import cancel_alive_tasks
 
 if TYPE_CHECKING:
     from .service import Service
@@ -25,21 +26,6 @@ def _dummy_online():
         pass
 
     return _dummy_offline
-
-
-def _cancel_alive_tasks(loop: asyncio.AbstractEventLoop):
-    to_cancel = asyncio.tasks.all_tasks(loop)
-    if to_cancel:
-        for tsk in to_cancel:
-            tsk.cancel()
-        loop.run_until_complete(asyncio.gather(*to_cancel, return_exceptions=True))
-
-        for task in to_cancel:  # pragma: no cover
-            # BELIEVE IN PSF
-            if task.cancelled():
-                continue
-            if task.exception() is not None:
-                logger.opt(exception=task.exception()).error(f"Unhandled exception when shutting down {task}:")
 
 
 class UnhandledExit(Exception):
@@ -274,7 +260,7 @@ class Bootstrap:
                 signal.signal(sig, handler)
 
         try:
-            _cancel_alive_tasks(loop)
+            cancel_alive_tasks(loop)
             loop.run_until_complete(loop.shutdown_asyncgens())
             with contextlib.suppress(RuntimeError, AttributeError):
                 # LINK: https://docs.python.org/3.10/library/asyncio-eventloop.html#asyncio.loop.shutdown_default_executor

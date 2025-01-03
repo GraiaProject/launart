@@ -1,133 +1,38 @@
-from __future__ import annotations
-
-import asyncio
-from typing import Literal, Optional, Union
-
-from statv import Stats, Statv
-
-from launart._sideload import FutureMark
-
-U_ManagerStage = Literal["preparing", "blocking", "cleaning", "finished"]
-U_Stage = Union[
-    Literal[
-        "waiting-for-prepare",
-        "preparing",
-        "prepared",
-        "blocking",
-        "blocking-completed",
-        "waiting-for-cleanup",
-        "cleanup",
-        "finished",
-    ],
-    None,
-]
-Phase = Literal["preparing", "blocking", "cleanup"]
-STAGE_STAT = {
-    None: {"waiting-for-prepare", "waiting-for-cleanup", "blocking", "finished"},
-    "waiting-for-prepare": {"preparing"},
-    "preparing": {"prepared"},
-    "prepared": {"blocking", "waiting-for-cleanup", "finished"},
-    "blocking": {"blocking-completed"},
-    "blocking-completed": {"waiting-for-cleanup", "finished"},
-    "waiting-for-cleanup": {"cleanup"},
-    "cleanup": {"finished"},
-    "finished": {None},
-}
-STATS = [
-    None,
-    "waiting-for-prepare",
-    "preparing",
-    "prepared",
-    "blocking",
-    "blocking-completed",
-    "waiting-for-cleanup",
-    "cleanup",
-    "finished",
-]
+from _bootstrap.context import ServiceContext
+from _bootstrap.status import Stage, Phase
 
 
-class ManagerStatus(Statv):
-    stage = Stats[Optional[U_ManagerStage]]("U_ManagerStage", default=None)
-    exiting = Stats[bool]("exiting", default=False)
+class ManagerStatus:
 
-    def __init__(self) -> None:
-        super().__init__()
+    def __init__(self, context: ServiceContext):
+        self._context = context
 
     def __repr__(self) -> str:
-        return f"<ManagerStatus stage={self.stage} waiters={len(self._waiters)}>"
+        return f"<ManagerStatus stage={self._context._status}>"
 
     @property
     def preparing(self) -> bool:
-        return self.stage == "preparing"
+        return self._context._status == (Stage.PREPARE, Phase.PENDING)
 
     @property
     def blocking(self) -> bool:
-        return self.stage == "blocking"
+        return self._context._status == (Stage.ONLINE, Phase.PENDING)
 
     @property
     def cleaning(self) -> bool:
-        return self.stage == "cleaning"
-
-    async def wait_for_update(self, *, current: str | None = None, stage: U_ManagerStage | None = None):
-        waiter = asyncio.Future()
-        if current is not None:
-            waiter.add_done_callback(FutureMark(current, stage))
-        self._waiters.append(waiter)
-        try:
-            return await waiter
-        finally:
-            self._waiters.remove(waiter)
+        return self._context._status == (Stage.CLEANUP, Phase.PENDING)
 
     async def wait_for_preparing(self):
-        while not self.preparing:
-            await self.wait_for_update()
+        return await self._context.wait_for(Stage.PREPARE, Phase.PENDING)
 
     async def wait_for_blocking(self):
-        while not self.blocking:
-            await self.wait_for_update()
+        return await self._context.wait_for(Stage.ONLINE, Phase.PENDING)
 
-    async def wait_for_cleaning(self, *, current: str | None = None):
-        while not self.cleaning:
-            await self.wait_for_update(current=current, stage="cleaning")
+    async def wait_for_cleaning(self):
+        return await self._context.wait_for(Stage.CLEANUP, Phase.PENDING)
 
-    async def wait_for_finished(self, *, current: str | None = None):
-        while self.stage not in {"finished", None}:
-            await self.wait_for_update(current=current, stage="finished")
+    async def wait_for_finished(self):
+        return await self._context.wait_for(Stage.EXIT, Phase.WAITING)
 
     async def wait_for_sigexit(self):
-        while self.stage in {"preparing", "blocking"} and not self.exiting:
-            await self.wait_for_update()
-
-
-class ServiceStatus(Statv):
-    stage = Stats[Optional[U_Stage]]("stage", default=None)
-
-    def __init__(self) -> None:
-        super().__init__()
-
-    @property
-    def prepared(self) -> bool:
-        return self.stage in ("prepared", "blocking")
-
-    @property
-    def blocking(self) -> bool:
-        return self.stage == "blocking"
-
-    @property
-    def finished(self) -> bool:
-        return self.stage == "finished"
-
-    @staticmethod
-    @stage.validator
-    def _(stats: Stats[U_Stage | None], past: U_Stage | None, current: U_Stage | None):
-        if current not in STAGE_STAT[past]:
-            raise ValueError(f"Invalid stage transition: {past} -> {current}")
-        return current
-
-    def unset(self) -> None:
-        self.stage = None
-
-    async def wait_for(self, stage: U_Stage = None):
-        stages = set(STATS[STATS.index(stage) :])
-        while self.stage not in stages:
-            await self.wait_for_update()
+        return await self._context.wait_for_sigexit()

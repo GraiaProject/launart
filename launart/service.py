@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
-from contextlib import asynccontextmanager
-from typing import TYPE_CHECKING, Literal, Optional, Set
+from typing import TYPE_CHECKING, Literal, Optional, Set, ClassVar
 
-from launart.status import STAGE_STAT, STATS, Phase, ServiceStatus, U_Stage
-from launart.utilles import any_completed
+
+from _bootstrap.service import Service as BaseService
+from _bootstrap.context import ServiceContext
+from _bootstrap.status import Stage
+
+from .util import override
+from .status import ManagerStatus
 
 if TYPE_CHECKING:
     from launart.manager import Launart
@@ -13,20 +17,12 @@ if TYPE_CHECKING:
 
 class Service(metaclass=ABCMeta):
     id: str
-    status: ServiceStatus
     manager: Optional[Launart] = None
-
-    def __init__(self) -> None:
-        self.status = ServiceStatus()
+    _context: Optional[ServiceContext] = None
 
     @property
     @abstractmethod
     def required(self) -> Set[str]:
-        ...
-
-    @property
-    @abstractmethod
-    def stages(self) -> Set[Phase]:
         ...
 
     def ensure_manager(self, manager: Launart):
@@ -34,54 +30,47 @@ class Service(metaclass=ABCMeta):
             raise RuntimeError("this component attempted to be mistaken a wrong ownership of launart/manager.")
         self.manager = manager
 
-    @asynccontextmanager
-    async def stage(self, stage: Literal["preparing", "blocking", "cleanup"]):
-        if self.manager is None:
-            raise RuntimeError("attempted to set stage of a component without a manager.")
-        if self.manager.status.stage is None:
-            raise LookupError("attempted to set stage of a component without a current manager")
-        if stage not in self.stages:
-            raise ValueError(f"undefined and unexpected stage entering: {stage}")
+    def _ensure_context(self, context: ServiceContext):
+        if self._context is not None and self._context is not context:
+            raise RuntimeError("this component attempted to be mistaken a wrong context.")
+        self._context = context
 
+    def stage(self, stage: Literal["preparing", "blocking", "cleanup"]):
+        if self._context is None:
+            raise RuntimeError("attempted to set stage of a component without a context.")
+        # if self._context._status[0] is Stage.EXIT:
+        #    raise LookupError("attempted to set stage of a component without a current context")
+        if stage not in {"preparing", "blocking", "cleanup"}:
+            raise ValueError(f"undefined and unexpected stage entering: {stage}")
+        ctx = self._context
         if stage == "preparing":
-            if "waiting-for-prepare" not in STAGE_STAT[self.status.stage]:
-                raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-prepare")
-            await self.manager.status.wait_for_preparing()
-            self.status.stage = "waiting-for-prepare"
-            await self.status.wait_for("preparing")
-            yield
-            self.status.stage = "prepared"
+            return ctx.prepare()
         elif stage == "blocking":
-            if "blocking" not in STAGE_STAT[self.status.stage]:
-                raise ValueError(f"unexpected stage entering: {self.status.stage} -> blocking")
-            await self.manager.status.wait_for_blocking()
-            await self.wait_for_required()
-            self.status.stage = "blocking"
-            yield
-            self.status.stage = "blocking-completed"
+            return ctx.online()
         elif stage == "cleanup":
-            if "waiting-for-cleanup" not in STAGE_STAT[self.status.stage]:
-                raise ValueError(f"unexpected stage entering: {self.status.stage} -> waiting-for-cleanup")
-            await self.manager.status.wait_for_cleaning(current=self.id)
-            self.status.stage = "waiting-for-cleanup"
-            await self.status.wait_for("cleanup")
-            yield
-            self.status.stage = "finished"
+            return ctx.cleanup()
         else:
             raise ValueError(f"entering unexpected stage: {stage}(unknown definition)")
 
-    async def wait_for_required(self, stage: U_Stage = "prepared"):
-        await self.wait_for(stage, *self.required)
-
-    async def wait_for(self, stage: U_Stage, *component_id: str | type[Service]):
-        if self.manager is None:
-            raise RuntimeError("attempted to wait for some components without a manager.")
-        components = [self.manager.get_component(id) for id in component_id]
-        while any(component.status.stage not in STATS[STATS.index(stage) :] for component in components):
-            await any_completed(
-                *[component.status.wait_for_update() for component in components if component.status.stage != stage]
-            )
-
-    @abstractmethod
     async def launch(self, manager: Launart):
         pass
+
+
+def make_service(serv: Service) -> BaseService:
+    from launart.manager import Launart
+
+    class _Service(BaseService):
+        id = serv.id
+        __launart_service__: ClassVar[Service] = serv
+
+        @property
+        def dependencies(self):
+            return tuple(serv.required)
+
+        async def launch(self, context: ServiceContext):
+            serv._ensure_context(context)
+            manager = Launart.current()
+            await serv.launch(override(manager, {"status": ManagerStatus(context)}))
+
+    b_s = type(serv.__class__.__name__, (_Service,), {})()
+    return b_s

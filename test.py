@@ -6,7 +6,6 @@ from launart import Launart, Service
 art = Launart()
 
 
-
 class TestSrv(Service):
     id = "test_srv"
 
@@ -36,14 +35,14 @@ class TestService(Service):
 
     async def launch(self, manager: Launart):
         async with self.stage("preparing"):
-            print("prepare")
+            print("prepare 1")
             await asyncio.sleep(3)
         async with self.stage("blocking"):
-            print("blocking")
+            print("blocking 1")
             await asyncio.sleep(3)
             print("unblocking 1")
         async with self.stage("cleanup"):
-            print("cleanup")
+            print("cleanup 1")
             await asyncio.sleep(3)
 
 
@@ -60,19 +59,19 @@ class Test2(Service):
 
     async def launch(self, manager: Launart):
         async with self.stage("preparing"):
-            print("prepare2")
+            print("prepare 2")
 
         async with self.stage("blocking"):
-            print("blocking")
-            print("test for sideload")
-            manager.add_component(TestSideload())
+            print("blocking 2")
+            # print("test for sideload")
+            # manager.add_component(TestSideload())
             await asyncio.sleep(3)
             print("unblocking 2")
             # await asyncio.sleep(1)
-            await manager.components["test_sideload"].status.wait_for("blocking")
-            print("sideload in blocking, test for active cleanup")
-            manager.remove_component("test_sideload")
-            await asyncio.sleep(10)
+            # await manager.components["test_sideload"].status.wait_for("blocking")
+            # print("sideload in blocking, test for active cleanup")
+            # manager.remove_component("test_sideload")
+            # await asyncio.sleep(10)
 
         async with self.stage("cleanup"):
             print("cleanup2")
