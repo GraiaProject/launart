@@ -93,10 +93,20 @@ class Launart:
         loop: asyncio.AbstractEventLoop | None = None,
         stop_signal: Iterable[signal.Signals] = (signal.SIGINT,),
     ):
+        from creart import it
         import contextlib
         import threading
 
-        loop = asyncio.new_event_loop()
+        if loop is not None:  # pragma: no cover
+            from warnings import warn
+
+            warn(
+                "The loop argument is deprecated since launart 0.6.4, " "and scheduled for removal in launart 0.7.0.",
+                DeprecationWarning,
+                stacklevel=2,
+            )
+
+        loop = it(asyncio.AbstractEventLoop)
 
         logger.info("Starting launart main task...", style="green bold")
 

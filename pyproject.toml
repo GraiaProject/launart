@@ -32,7 +32,8 @@ profile = "black"
 [tool.coverage.run]
 branch = true
 source = ["."]
-omit = ["tests/*", "test.py"]
+# omit = ["tests/*", "test.py"]
+omit = ["test.py"]  # TODO: fix tests/*
 
 [tool.coverage.report]
 # Regexes for lines to exclude from consideration
