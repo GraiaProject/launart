@@ -116,6 +116,7 @@ class Bootstrap:
     async def _service_daemon(self, service: Service, context: ServiceContext):
         await service.launch(context)
         context.exit_complete()
+        await context.wait_for_sigexit()  # FIXME: not correctly, just for testing
 
     async def _handle_stage_prepare(self, services: Iterable[Service]):
         bind = {service.id: service for service in services}

@@ -44,6 +44,12 @@ class Launart:
 
         asyncio.create_task(_())
 
+    async def add_sideload(self, component: Service):
+        if not self._core.running:
+            raise ValueError("Cannot add a service while the launart is not running.")
+        online = await self._core.start_lifespan([make_service(component)])
+        self._offlines[component.id] = online()
+
     @overload
     def get_component(self, target: type[TL]) -> TL:
         ...
@@ -81,6 +87,16 @@ class Launart:
             raise ValueError(f"Service {serv_id} cannot be removed.")
         offline = self._offlines.pop(serv_id)
         asyncio.create_task(offline())
+
+    async def remove_sideload(self, component: str | Service):
+        if isinstance(component, str):
+            serv_id = component
+        else:
+            serv_id = component.id
+        if serv_id not in self._offlines:
+            raise ValueError(f"Service {serv_id} cannot be removed.")
+        offline = self._offlines.pop(serv_id)
+        await offline()
 
     def get_interface(self, interface_type: type[T]) -> T:
         provider_map = self._default_isolate["interface_provide"]
