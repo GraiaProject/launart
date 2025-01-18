@@ -32,6 +32,10 @@ async def any_completed(tasks: Iterable[_CoroutineLike]):
     return next(iter(done)), pending
 
 
+async def oneof(*tasks: _CoroutineLike):
+    return await any_completed(tasks)
+
+
 def cancel_alive_tasks(loop: asyncio.AbstractEventLoop):
     to_cancel = asyncio.tasks.all_tasks(loop)
     if to_cancel:
@@ -63,17 +67,26 @@ class TaskGroup:
     tasks: list[asyncio.Task]
     main: asyncio.Task | None = None
     _stop: bool = False
+    _notify: asyncio.Event
 
     def __init__(self):
         self.tasks = []
+        self._notify = asyncio.Event()
 
     def flush(self):
         if self.main is not None:
-            self.main.cancel()
+            self._notify.set()
 
     def stop(self):
         self._stop = True
         self.flush()
+
+    def spawn(self, task: asyncio.Task | Coroutine):
+        task = asyncio.create_task(task) if asyncio.iscoroutine(task) else task
+        self.tasks.append(task)
+
+        self.flush()
+        return task
 
     def update(self, tasks: Iterable[asyncio.Task | Coroutine]):
         tasks = [asyncio.create_task(task) if asyncio.iscoroutine(task) else task for task in tasks]
@@ -90,10 +103,31 @@ class TaskGroup:
 
     async def wait(self):
         while True:
+            if not self.tasks:
+                await self._notify.wait()
+                self._notify.clear()
+
             self.main = asyncio.create_task(asyncio.wait(self.tasks))
-            try:
-                return await self.main
-            except asyncio.CancelledError:
+            awaiting_notify = asyncio.create_task(self._notify.wait())
+
+            await asyncio.wait([self.main, awaiting_notify], return_when=asyncio.FIRST_COMPLETED)
+
+            if awaiting_notify.done():
+                self._notify.clear()
                 if self._stop:
-                    self.main = None
-                    return
+                    break
+
+                continue
+
+            await self.main
+            return
+
+    async def __aenter__(self):
+        pass
+
+    async def __aexit__(self, exc_type, exc_val, exc_tb):
+        self.stop()
+        await self.wait()
+
+    def __await__(self):
+        return self.wait().__await__()

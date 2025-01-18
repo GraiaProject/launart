@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import signal
 from contextvars import ContextVar
-from typing import Any, ClassVar, Iterable, TypeVar, cast, overload
+from collections.abc import Coroutine
+from typing import Any, ClassVar, Callable, Iterable, TypeVar, cast, overload
 
 from loguru import logger
 
@@ -12,7 +13,7 @@ from _bootstrap import Service as _Service
 from _bootstrap.utiles import cancel_alive_tasks, cvar
 from launart.service import Service, make_service
 
-from .status import ManagerStatus
+from .status import Status as ManagerStatus
 
 T = TypeVar("T")
 TL = TypeVar("TL", bound=Service)
@@ -24,8 +25,10 @@ class Launart:
 
     def __init__(self):
         self._core = Bootstrap()
-        self._offlines = {}
+        self._rollbacks: dict[str, Callable[[], Coroutine[Any, Any, None]]] = {}
+        self._running = False
         self._default_isolate = {"interface_provide": {}}
+        self._initial_services: dict[str, Service] = {}
 
     @classmethod
     def current(cls) -> Launart:
@@ -35,20 +38,17 @@ class Launart:
         self._default_isolate["interface_provide"][interface] = service
 
     def add_component(self, component: Service):
-        if not self._core.running:
-            return self._core.add_initial_services(make_service(component))
+        if not self._running:
+            self._initial_services[component.id] = component
+            return
 
-        async def _():
-            online = await self._core.start_lifespan([make_service(component)])
-            self._offlines[component.id] = online()
-
-        asyncio.create_task(_())
+        _t = asyncio.create_task(self._core.spawn(make_service(component)))
+        _t.add_done_callback(lambda _: self._rollbacks.update({component.id: _t.result()}))
 
     async def add_sideload(self, component: Service):
-        if not self._core.running:
+        if not self._running:
             raise ValueError("Cannot add a service while the launart is not running.")
-        online = await self._core.start_lifespan([make_service(component)])
-        self._offlines[component.id] = online()
+        self._rollbacks[component.id] = await self._core.spawn(make_service(component))
 
     @overload
     def get_component(self, target: type[TL]) -> TL:
@@ -60,10 +60,8 @@ class Launart:
 
     def get_component(self, target: str | type[TL]) -> TL | Service:
         try:
-            if isinstance(target, str):
-                _serv = self._core.get_service(target)
-            else:
-                _serv = self._core.get_service(target.id)
+            _id = target if isinstance(target, str) else target.id
+            _serv = self._core.graph.services[_id]
         except KeyError:
             raise ValueError(f"Service {target} does not exists.") from None
         if not hasattr(_serv, "__launart_service__"):
@@ -74,29 +72,23 @@ class Launart:
         self,
         component: str | Service,
     ):
-        if isinstance(component, str):
-            serv_id = component
-        else:
-            serv_id = component.id
-        if not self._core.running:
-            if serv_id not in self._core.initial_services:
+        serv_id = component if isinstance(component, str) else component.id
+        if not self._running:
+            if serv_id not in self._initial_services:
                 raise ValueError(f"Service {serv_id} does not exists.")
-            self._core.initial_services.pop(serv_id)
+            self._initial_services.pop(serv_id)
             return
-        if serv_id not in self._offlines:
+        if serv_id not in self._rollbacks:
             raise ValueError(f"Service {serv_id} cannot be removed.")
-        offline = self._offlines.pop(serv_id)
-        asyncio.create_task(offline())
+        rollback = self._rollbacks.pop(serv_id)
+        asyncio.create_task(rollback())
 
     async def remove_sideload(self, component: str | Service):
-        if isinstance(component, str):
-            serv_id = component
-        else:
-            serv_id = component.id
-        if serv_id not in self._offlines:
+        serv_id = component if isinstance(component, str) else component.id
+        if serv_id not in self._rollbacks:
             raise ValueError(f"Service {serv_id} cannot be removed.")
-        offline = self._offlines.pop(serv_id)
-        await offline()
+        rollback = self._rollbacks.pop(serv_id)
+        await rollback()
 
     def get_interface(self, interface_type: type[T]) -> T:
         provider_map = self._default_isolate["interface_provide"]
@@ -106,8 +98,12 @@ class Launart:
         return service.get_interface(interface_type)
 
     async def launch(self):
+        self._running = True
+        srvs = [make_service(s) for s in self._initial_services.values()]
         with cvar(self._context, self):
-            return await self._core.launch()
+            await self._core.launch(*srvs)
+        self._running = False
+        return
 
     def launch_blocking(
         self,
@@ -137,7 +133,14 @@ class Launart:
         handled_signals: dict[signal.Signals, Any] = {}
 
         def signal_handler(*_):
-            return self._on_sys_signal(launch_task)
+            for service in self._core.graph.services:
+                self._core.graph.contexts[service].exit()
+
+            if not launch_task.done():
+                launch_task.cancel()
+                # wakeup loop if it is blocked by select() with long timeout
+                launch_task.get_loop().call_soon_threadsafe(lambda: None)
+                logger.warning("Ctrl-C triggered by user.", style="dark_orange bold")
 
         if threading.current_thread() is threading.main_thread():  # pragma: worst case
             try:
@@ -164,21 +167,3 @@ class Launart:
         finally:
             asyncio.set_event_loop(None)
             logger.success("asyncio shutdown complete.", style="green bold")
-
-    def _sigexit_trig(self, services: Iterable[_Service]):
-        for service in services:
-            self._core.contexts[service.id].exit()
-
-    def _on_sys_signal(self, launch_task: asyncio.Task):
-        self._sigexit_trig(self._core.services.values())
-
-        if self._core.task_group is not None:
-            self._core.task_group.stop()
-            if self._core.task_group.main is not None:  # pragma: worst case
-                self._core.task_group.main.cancel()
-
-        if not launch_task.done():
-            launch_task.cancel()
-            # wakeup loop if it is blocked by select() with long timeout
-            launch_task.get_loop().call_soon_threadsafe(lambda: None)
-            logger.warning("Ctrl-C triggered by user.", style="dark_orange bold")

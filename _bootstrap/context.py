@@ -3,87 +3,130 @@ from __future__ import annotations
 import asyncio
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
-
-from .status import Phase, ServiceStatusValue, Stage
+from enum import Enum, auto
+from typing import TYPE_CHECKING, ClassVar
 
 if TYPE_CHECKING:
     from .core import Bootstrap
 
 
+class _State(Enum):
+    PREPARE_PRE = auto()
+    PREPARE_POST = auto()
+    CLEANUP_PRE = auto()
+    CLEANUP_POST = auto()
+    READY = auto()
+
+
 @dataclass
 class ServiceContext:
+    State: ClassVar = _State
+
     bootstrap: Bootstrap
 
     def __post_init__(self):
-        self._status: ServiceStatusValue = (Stage.EXIT, Phase.WAITING)
-        self._sigexit = asyncio.Event()
+        self._state: _State | None = None
+        self._ready: bool | None = None
         self._notify = asyncio.Event()
+        self._switch = asyncio.Event()
+        self._sigexit = asyncio.Event()
 
-    def _forward(self, stage: Stage, phase: Phase):
-        prev_stage, prev_phase = self._status
-
-        if stage < prev_stage and prev_stage != Stage.EXIT:
-            raise ValueError(f"Cannot update stage from {prev_stage} to {stage}")
-
-        if stage == prev_stage:
-            if phase <= prev_phase:
-                raise ValueError(f"Cannot update phase from {prev_phase} to {phase}")
-        else:
-            phase = Phase.WAITING
-
-        self._status = (stage, phase)
-
+    def _update(self):
         self._notify.set()
-        self._notify.clear()
+
+    def switch(self):
+        self._switch.set()
+
+    def enter(self):
+        if self._state is not _State.PREPARE_POST:
+            return
+
+        self._ready = True
+        self._update()
+
+    def skip(self):
+        if self._state is not _State.PREPARE_POST:
+            return
+
+        self._ready = False
+        self._update()
+
+    def exit(self):
+        "Call by the manager"
+        self._sigexit.set()
+
+    @property
+    def state(self):
+        if self._ready:
+            return self.State.READY
+        return self._state
+
+    async def wait_prepare_pre(self):
+        await self._switch.wait()
+        if self._state is not _State.PREPARE_PRE:
+            raise RuntimeError(f"expected {self.State.PREPARE_PRE}, got {self._state}")
+
+        self._switch.clear()
+        self._update()
+
+    async def wait_cleanup_pre(self):
+        await self._switch.wait()
+        if self._state is not _State.CLEANUP_PRE:
+            raise RuntimeError(f"expected {self.State.CLEANUP_PRE}, got {self._state}")
+
+        self._switch.clear()
+        self._update()
+
+    async def wait_prepare_post(self):
+        await self._switch.wait()
+        if self._state is not _State.PREPARE_POST:
+            raise RuntimeError(f"expected {self.State.PREPARE_POST}, got {self._state}")
+
+        self._switch.clear()
+
+    async def wait_cleanup_post(self):
+        await self._switch.wait()
+        if self._state is not _State.CLEANUP_POST:
+            raise RuntimeError(f"expected {self.State.CLEANUP_POST}, got {self._state}")
+
+        self._switch.clear()
+
+    async def wait_for_sigexit(self):
+        await self._sigexit.wait()
+
+    @property
+    def ready(self):
+        if self._ready is None:
+            raise RuntimeError("ServiceContext.ready is not available outside of prepare context")
+
+        return self._ready
 
     @property
     def should_exit(self):
         return self._sigexit.is_set()
 
-    async def wait_for(self, stage: Stage, phase: Phase):
-        val = (stage, phase)
-
-        while val > self._status:
-            await self._notify.wait()
-
-    async def wait_for_sigexit(self):
-        await self._sigexit.wait()
-
     @asynccontextmanager
     async def prepare(self):
-        self._forward(Stage.PREPARE, Phase.WAITING)
-        await self.wait_for(Stage.PREPARE, Phase.PENDING)
+        self._state = _State.PREPARE_PRE
+        self.switch()
+        await self._notify.wait()
+        self._notify.clear()
         yield
-        self._forward(Stage.PREPARE, Phase.COMPLETED)
-
-    @asynccontextmanager
-    async def online(self):
-        self._forward(Stage.ONLINE, Phase.WAITING)
-        await self.wait_for(Stage.ONLINE, Phase.PENDING)
-        yield
-        self._forward(Stage.ONLINE, Phase.COMPLETED)
+        self._state = _State.PREPARE_POST
+        self.switch()
+        await self._notify.wait()
+        self._notify.clear()
+        self._state = None
 
     @asynccontextmanager
     async def cleanup(self):
-        self._forward(Stage.CLEANUP, Phase.WAITING)
-        await self.wait_for(Stage.CLEANUP, Phase.PENDING)
+        self._state = _State.CLEANUP_PRE
+        self.switch()
+        await self._notify.wait()
+        self._notify.clear()
         yield
-        self._forward(Stage.CLEANUP, Phase.COMPLETED)
-
-    def dispatch_prepare(self):
-        self._forward(Stage.PREPARE, Phase.PENDING)
-
-    def dispatch_online(self):
-        self._forward(Stage.ONLINE, Phase.PENDING)
-
-    def dispatch_cleanup(self):
-        self._forward(Stage.CLEANUP, Phase.PENDING)
-
-    def exit(self):
-        """Call by the manager"""
-        self._sigexit.set()
-
-    def exit_complete(self):
-        """Call by the manager"""
-        self._status = (Stage.EXIT, Phase.COMPLETED)
+        self._state = _State.CLEANUP_POST
+        self.switch()
+        await self._notify.wait()
+        self._notify.clear()
+        self._state = None

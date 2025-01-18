@@ -32,8 +32,7 @@ profile = "black"
 [tool.coverage.run]
 branch = true
 source = ["."]
-# omit = ["tests/*", "test.py"]
-omit = ["test.py"]  # TODO: fix tests/*
+omit = ["tests/*", "test.py", "test-launart.py"]
 
 [tool.coverage.report]
 # Regexes for lines to exclude from consideration
@@ -85,6 +84,6 @@ build-backend = "pdm.backend"
 exclude = ["__pypackages__"]
 
 [tool.pytest.ini_options]
-python_files = "test.py"  # TODO: fix tests/*
+python_files = "test-launart.py"  # TODO: fix tests/*
 asyncio_mode = "strict"
 norecursedirs = "_saya_mod"

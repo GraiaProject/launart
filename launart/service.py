@@ -2,11 +2,12 @@ from __future__ import annotations
 
 from abc import ABCMeta, abstractmethod
 from typing import TYPE_CHECKING, ClassVar, Literal, Optional, Set
+from contextlib import asynccontextmanager
 
 from _bootstrap.context import ServiceContext
 from _bootstrap.service import Service as BaseService
 
-from .status import ManagerStatus
+from .status import Status
 from .util import override
 from ._patch import patch_launch
 
@@ -29,6 +30,16 @@ class Service(metaclass=ABCMeta):
     def stages(self) -> Set[Literal["preparing", "blocking", "cleanup"]]:
         ...
 
+    @property
+    def context(self) -> ServiceContext:
+        if self._context is None:
+            raise RuntimeError("this component does not have a context yet.")
+        return self._context
+
+    @property
+    def status(self) -> Status:
+        return Status(self.context)
+
     def ensure_manager(self, manager: Launart):
         if self.manager is not None and self.manager is not manager:
             raise RuntimeError("this component attempted to be mistaken a wrong ownership of launart/manager.")
@@ -48,7 +59,12 @@ class Service(metaclass=ABCMeta):
         if stage == "preparing":
             return ctx.prepare()
         elif stage == "blocking":
-            return ctx.online()
+            @asynccontextmanager
+            async def _blocking():
+                await self.status.wait_for_blocking()
+                yield
+
+            return _blocking()
         elif stage == "cleanup":
             return ctx.cleanup()
         else:
@@ -68,13 +84,13 @@ def make_service(serv: Service) -> BaseService:
         __launart_service__: ClassVar[Service] = serv
 
         @property
-        def dependencies(self):
+        def after(self):
             return tuple(serv.required)
 
         async def launch(self, context: ServiceContext):
             serv._ensure_context(context)
             manager = Launart.current()
-            await launch(override(manager, {"status": ManagerStatus(context)}))
+            await launch(manager)#override(manager, {"status": Status(context)}))
 
     b_s = type(serv.__class__.__name__, (_Service,), {})()
     return b_s
